@@ -125,7 +125,9 @@ def summarize_technology(technology_details) -> str:
     return f"技术方案中已体现出对{first_category}的关注，如{tech_text}等要素。"
 
 
-def summarize_topic_relevance(topic_keywords: list[str], topic_relevance_ratio: float) -> str:
+def summarize_topic_relevance(
+    topic_keywords: list[str], topic_relevance_ratio: float
+) -> str:
     """Summarize topical focus from the relevance analysis."""
 
     if not topic_keywords:

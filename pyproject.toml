@@ -35,7 +35,6 @@ docstring-code-format = true
 docstring-code-line-length = 60
 # Use `\n` line endings for all files
 line-ending = "lf"
-skip-magic-trailing-comma = true
 
 [tool.ruff.lint]
 extend-select = [

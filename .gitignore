@@ -28,8 +28,6 @@ __pycache__
 ### Python ###
 *.pt
 *.pth
-*.lock
-
 
 *.docx
 

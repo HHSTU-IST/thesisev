@@ -125,7 +125,9 @@ def print_structure(document) -> None:
         relevant_paragraphs = sum(
             paragraph.topic_is_relevant for paragraph in document.paragraphs
         )
-        print(f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{len(document.paragraphs)}")
+        print(
+            f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{len(document.paragraphs)}"
+        )
     print()
     if document.front_matter:
         print("Front Matter:")

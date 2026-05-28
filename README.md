@@ -17,21 +17,28 @@ Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手�
 安装：
 
 ```bash
-uv pip install -e .
+uv sync
 ```
 
 运行基础评估：
 
 ```bash
-thesisev examples/sample_thesis.md
-thesisev examples/sample_thesis.docx
+uv run thesisev examples/sample_thesis.md
+uv run thesisev examples/sample_thesis.docx
 ```
 
 查看第一阶段的结构化输出：
 
 ```bash
-thesisev examples/sample_thesis.md --output structure
-thesisev examples/sample_thesis.docx --output structure --json
+uv run thesisev examples/sample_thesis.md --output structure
+uv run thesisev examples/sample_thesis.docx --output structure --json
+```
+
+更新依赖与锁文件：
+
+```bash
+uv lock
+uv sync
 ```
 
 ## 项目目标
