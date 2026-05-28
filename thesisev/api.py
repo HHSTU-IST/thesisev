@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from thesisev.history import append_history, read_history
 from thesisev.service import evaluate_document, structure_document
 
 
@@ -43,7 +44,13 @@ class ApiResponse(BaseModel):
     """Generic API response wrapper."""
 
     ok: bool
-    mode: Literal["evaluate", "structure", "evaluate_upload", "evaluate_text"]
+    mode: Literal[
+        "evaluate",
+        "structure",
+        "evaluate_upload",
+        "evaluate_text",
+        "history",
+    ]
     data: dict[str, Any]
 
 
@@ -71,6 +78,13 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/history", response_model=ApiResponse)
+def history() -> ApiResponse:
+    """Return recent compact evaluation history."""
+
+    return ApiResponse(ok=True, mode="history", data={"items": read_history()})
+
+
 @app.post("/evaluate", response_model=ApiResponse)
 def evaluate(request: EvaluateRequest) -> ApiResponse:
     """Evaluate a thesis document and generate commentary."""
@@ -88,6 +102,7 @@ def evaluate(request: EvaluateRequest) -> ApiResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_history(result)
     return ApiResponse(ok=True, mode="evaluate", data=result.to_dict())
 
 
@@ -133,6 +148,7 @@ async def evaluate_upload(
     finally:
         if "temp_path" in locals() and temp_path.exists():
             temp_path.unlink()
+    append_history(result)
     return ApiResponse(ok=True, mode="evaluate_upload", data=result.to_dict())
 
 
@@ -165,6 +181,7 @@ def evaluate_text(
     finally:
         if "temp_path" in locals() and temp_path.exists():
             temp_path.unlink()
+    append_history(result)
     return ApiResponse(ok=True, mode="evaluate_text", data=result.to_dict())
 
 

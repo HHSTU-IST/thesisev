@@ -18,8 +18,8 @@
       </p>
     </section>
 
-    <section class="panel">
-      <form id="evaluate-form" class="form-grid">
+      <section class="panel">
+        <form id="evaluate-form" class="form-grid">
         <label class="field field-span-2">
           <span>论文文本</span>
           <textarea id="text" name="text" rows="10" placeholder="直接粘贴论文内容；如果上传文件，这里可以留空。"></textarea>
@@ -64,8 +64,16 @@
           <button id="submit-button" type="submit">开始评价</button>
           <p id="status" class="status">等待输入</p>
         </div>
-      </form>
-    </section>
+        </form>
+      </section>
+
+      <section class="panel history-panel">
+        <div class="history-header">
+          <h2>最近评审</h2>
+          <button id="refresh-history" type="button" class="ghost-button">刷新</button>
+        </div>
+        <ul id="history-list" class="list"></ul>
+      </section>
 
       <section id="results" class="results hidden">
         <article class="panel result-card">
@@ -94,6 +102,13 @@
         <article class="panel result-card">
           <h2>章节树</h2>
           <div id="section-tree" class="tree"></div>
+        </article>
+
+        <article class="panel result-card">
+          <h2>聚焦详情</h2>
+          <div id="focus-panel" class="focus-panel">
+            <p class="focus-empty">点击章节树或问题项后，这里会显示对应的段落和上下文。</p>
+          </div>
         </article>
 
         <article class="panel result-card">
