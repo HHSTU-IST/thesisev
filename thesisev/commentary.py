@@ -6,10 +6,13 @@ import re
 from collections import defaultdict
 from typing import Any
 
+
 def generate_comment(
     title: str,
     keywords: list[str],
     technology_details,
+    topic_keywords: list[str],
+    topic_relevance_ratio: float,
     score: int,
     issues,
     root_sections,
@@ -19,6 +22,7 @@ def generate_comment(
     focus_keywords = select_comment_keywords(title=title, fallback_keywords=keywords)
     quality_phrase = score_to_phrase(score)
     structure_summary = summarize_structure(root_sections)
+    topic_summary = summarize_topic_relevance(topic_keywords, topic_relevance_ratio)
     technology_summary = summarize_technology(technology_details)
     issue_summary = summarize_issues(issues)
     score_summary = summarize_score(score)
@@ -26,22 +30,16 @@ def generate_comment(
     focus_text = "、".join(focus_keywords) if focus_keywords else "研究主题"
     comment = (
         f"论文围绕{focus_text}等内容展开，{structure_summary}，整体质量{quality_phrase}。"
-        f"{technology_summary}{issue_summary}{score_summary}当前评分约为 {score} 分。"
+        f"{topic_summary}{technology_summary}{issue_summary}{score_summary}当前评分约为 {score} 分。"
     )
     comment = comment.replace(title, focus_text)
     checks = assess_comment(
-        comment=comment,
-        title=title,
-        keywords=focus_keywords,
-        score=score,
+        comment=comment, title=title, keywords=focus_keywords, score=score
     )
     if not checks["passes_keyword_coverage"]:
         comment = reinforce_keyword_coverage(comment, checks["missing_keywords"])
         checks = assess_comment(
-            comment=comment,
-            title=title,
-            keywords=focus_keywords,
-            score=score,
+            comment=comment, title=title, keywords=focus_keywords, score=score
         )
     return comment, checks
 
@@ -127,6 +125,19 @@ def summarize_technology(technology_details) -> str:
     return f"技术方案中已体现出对{first_category}的关注，如{tech_text}等要素。"
 
 
+def summarize_topic_relevance(topic_keywords: list[str], topic_relevance_ratio: float) -> str:
+    """Summarize topical focus from the relevance analysis."""
+
+    if not topic_keywords:
+        return "主题关键词仍可进一步明确。"
+    keyword_text = "、".join(topic_keywords[:2])
+    if topic_relevance_ratio >= 0.7:
+        return f"主题聚焦度较好，与{keyword_text}相关的内容占比较高。"
+    if topic_relevance_ratio >= 0.45:
+        return f"主题关联内容占比基本合理，核心内容能够围绕{keyword_text}展开。"
+    return f"与{keyword_text}相关的内容占比仍然偏低，存在一定偏题风险。"
+
+
 def summarize_issues(issues) -> str:
     """Summarize issue detection results for the comment."""
 
@@ -159,8 +170,12 @@ def assess_comment(
 ) -> dict[str, Any]:
     """Validate keyword coverage, title repetition, and score alignment."""
 
-    covered_keywords = [keyword for keyword in keywords if keyword and keyword in comment]
-    missing_keywords = [keyword for keyword in keywords if keyword and keyword not in comment]
+    covered_keywords = [
+        keyword for keyword in keywords if keyword and keyword in comment
+    ]
+    missing_keywords = [
+        keyword for keyword in keywords if keyword and keyword not in comment
+    ]
     expected_keyword_count = min(2, len(keywords))
     passes_keyword_coverage = len(covered_keywords) >= expected_keyword_count
     repeats_title = title in comment

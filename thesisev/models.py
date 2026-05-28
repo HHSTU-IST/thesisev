@@ -22,6 +22,9 @@ class Paragraph:
     text: str
     sentences: list[Sentence]
     word_count: int
+    topic_relevance_score: float = 0.0
+    topic_matched_keywords: list[str] = field(default_factory=list)
+    topic_is_relevant: bool = False
 
 
 @dataclass(slots=True)
@@ -41,6 +44,9 @@ class Section:
     subtree_word_count: int = 0
     ratio: float = 0.0
     parent_ratio: float = 0.0
+    topic_relevance_score: float = 0.0
+    topic_relevant_word_count: int = 0
+    topic_matched_keywords: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the section to a JSON-friendly dictionary."""
@@ -129,6 +135,8 @@ class EvaluationResult:
     keywords: list[str]
     technology_stack: list[str]
     technology_details: list[TechnologyStackItem]
+    topic_keywords: list[str]
+    topic_relevance_ratio: float
     score: int
     comment: str
     comment_checks: dict[str, Any] = field(default_factory=dict)
@@ -146,6 +154,8 @@ class EvaluationResult:
             "technology_details": [
                 asdict(technology_item) for technology_item in self.technology_details
             ],
+            "topic_keywords": self.topic_keywords,
+            "topic_relevance_ratio": self.topic_relevance_ratio,
             "score": self.score,
             "comment": self.comment,
             "comment_checks": self.comment_checks,

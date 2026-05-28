@@ -70,6 +70,10 @@ def print_report(result) -> None:
     print()
     print("Keywords:")
     print(f"- {'、'.join(result.keywords) if result.keywords else 'None'}")
+    print("Topic Keywords:")
+    print(f"- {'、'.join(result.topic_keywords) if result.topic_keywords else 'None'}")
+    print("Topic Relevance:")
+    print(f"- {result.topic_relevance_ratio * 100:.1f}%")
     print()
     print("Technology Stack:")
     if not result.technology_details:
@@ -117,6 +121,11 @@ def print_structure(document) -> None:
     print(f"Total Words: {document.total_word_count}")
     print(f"Paragraphs: {len(document.paragraphs)}")
     print(f"Sentences: {len(document.sentences)}")
+    if document.paragraphs:
+        relevant_paragraphs = sum(
+            paragraph.topic_is_relevant for paragraph in document.paragraphs
+        )
+        print(f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{len(document.paragraphs)}")
     print()
     if document.front_matter:
         print("Front Matter:")
@@ -137,7 +146,8 @@ def print_section_tree(section, indent: int = 0) -> None:
     print(
         f"{prefix}- [{section.identifier}] {section.title} "
         f"(L{section.level}, paragraphs={len(section.paragraphs)}, "
-        f"words={section.word_count}, subtree={section.subtree_word_count}{ratio_display})"
+        f"words={section.word_count}, subtree={section.subtree_word_count}, "
+        f"topic={section.topic_relevance_score * 100:.1f}%{ratio_display})"
     )
     for child in section.children:
         print_section_tree(child, indent + 1)

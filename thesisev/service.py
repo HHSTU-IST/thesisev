@@ -6,6 +6,7 @@ from pathlib import Path
 
 from thesisev.analyzers import (
     annotate_section_statistics,
+    annotate_topic_relevance,
     build_statistics,
     calculate_score,
     detect_issues,
@@ -23,6 +24,7 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
 
     document = load_document(path)
     annotate_section_statistics(document)
+    topic_analysis = annotate_topic_relevance(document)
     statistics = build_statistics(document)
     issues = detect_issues(document)
     keywords = extract_keywords(document)
@@ -33,6 +35,8 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         title=document.title,
         keywords=keywords,
         technology_details=technology_details,
+        topic_keywords=topic_analysis["topic_keywords"],
+        topic_relevance_ratio=topic_analysis["document_ratio"],
         score=score,
         issues=issues,
         root_sections=document.root_sections,
@@ -44,10 +48,12 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         keywords=keywords,
         technology_stack=technology_stack,
         technology_details=technology_details,
+        topic_keywords=topic_analysis["topic_keywords"],
+        topic_relevance_ratio=topic_analysis["document_ratio"],
         score=score,
         comment=comment,
         comment_checks=comment_checks,
-        metadata={"version": "0.1.0"},
+        metadata={"version": "0.1.0", "topic_analysis": topic_analysis},
     )
 
 
@@ -56,4 +62,5 @@ def structure_document(path: str | Path) -> ThesisDocument:
 
     document = load_document(path)
     annotate_section_statistics(document)
+    annotate_topic_relevance(document)
     return document
