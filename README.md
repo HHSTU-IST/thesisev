@@ -9,6 +9,7 @@ Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手�
 - Python 3.13
 - LangChain 1.3+
 - FAISS 1.10+
+- FastAPI 0.13+
 - Ruff 0.15+
 - uv 0.11+
 
@@ -16,29 +17,29 @@ Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手�
 
 - `LangChain` 用于组织分析链路与模型调用
 - `FAISS` 可用于主题相关度或相似度检索
+- `FastAPI` 用于构建 API 接口和 GUI
 - `Ruff` 用于代码格式化与静态检查
 - `uv` 用于依赖管理与环境隔离
 
 ## 快速开始
 
-当前仓库已经提供一个可运行的 MVP，可用于分析 `txt` 或 `md` 格式的论文文本。
-
-安装方式：
+安装：
 
 ```bash
-pip install -e .
+uv pip install -e .
 ```
 
-运行示例：
+运行基础评估：
 
 ```bash
 thesisev examples/sample_thesis.md
 ```
 
-如果暂时不安装命令行入口，也可以直接使用模块方式运行：
+查看第一阶段的结构化输出：
 
 ```bash
-python -m thesisev.cli examples/sample_thesis.md
+thesisev examples/sample_thesis.md --output structure
+thesisev examples/sample_thesis.docx --output structure --json
 ```
 
 ## 项目目标
@@ -180,10 +181,10 @@ Thesisev 的整体流程可以拆成 4 步：
 
 目标是把论文稳定解析成结构化数据。
 
-- [ ] 实现文本读取与预处理
-- [ ] 实现章节和小节识别
-- [ ] 实现段落与句子切分
-- [ ] 输出统一论文数据结构
+- [x] 实现文本读取与预处理
+- [x] 实现章节和小节识别
+- [x] 实现段落与句子切分
+- [x] 输出统一论文数据结构
 
 ### 第二阶段：基础统计分析
 
@@ -278,3 +279,5 @@ Thesisev 的整体流程可以拆成 4 步：
 - 命令行或 API 文档
 - 测试方法
 - 贡献指南
+
+当前版本中的基础规则词表已经抽离到 `thesisev/data/*.json`，包括技术栈关键词、停用词和口语化表达规则，便于后续直接维护和扩展。

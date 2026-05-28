@@ -6,51 +6,11 @@ import re
 from collections import Counter
 
 from thesisev.models import Issue, Statistic, ThesisDocument
+from thesisev.resources import load_json_resource
 
-TECH_KEYWORDS = {
-    "Python",
-    "Java",
-    "C++",
-    "LangChain",
-    "FAISS",
-    "NumPy",
-    "Pandas",
-    "PyTorch",
-    "TensorFlow",
-    "Scikit-learn",
-    "OpenAI",
-    "MySQL",
-    "PostgreSQL",
-    "Redis",
-    "Docker",
-    "FastAPI",
-    "Flask",
-}
-
-STOPWORDS = {
-    "基于",
-    "研究",
-    "设计",
-    "实现",
-    "系统",
-    "方法",
-    "分析",
-    "论文",
-    "一个",
-    "本文",
-    "进行",
-    "以及",
-    "相关",
-}
-
-COLLOQUIAL_PATTERNS = {
-    "我觉得": "建议改为更客观的学术表达，如“本文认为”或直接陈述观点。",
-    "其实": "建议删除或替换为更正式的连接表达。",
-    "然后": "连续叙述中建议替换为“随后”“接着”或更明确的逻辑词。",
-    "挺": "口语色彩较强，建议改为“较为”“相对”。",
-    "特别": "若用于程度强调，建议改为“显著”“尤其”等更正式表达。",
-    "很": "学术写作中可替换为更具体的程度描述。",
-}
+TECH_KEYWORDS = set(load_json_resource("tech_keywords.json"))
+STOPWORDS = set(load_json_resource("stopwords.json"))
+COLLOQUIAL_PATTERNS = load_json_resource("colloquial_patterns.json")
 
 
 def build_statistics(document: ThesisDocument) -> list[Statistic]:

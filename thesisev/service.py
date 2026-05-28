@@ -12,7 +12,7 @@ from thesisev.analyzers import (
     extract_technology_stack,
 )
 from thesisev.commentary import generate_comment
-from thesisev.models import EvaluationResult
+from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
 
 
@@ -42,3 +42,9 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         comment=comment,
         metadata={"version": "0.1.0"},
     )
+
+
+def structure_document(path: str | Path) -> ThesisDocument:
+    """Load a thesis document and return only its structured representation."""
+
+    return load_document(path)
