@@ -89,7 +89,10 @@ def print_report(result) -> None:
         return
     for issue in result.issues:
         print(
-            f"- [{issue.category}] {issue.section_title}: {issue.message}\n"
+            f"- [{issue.category}] {issue.section_identifier} {issue.section_title} "
+            f"(P{issue.paragraph_index}, S{issue.sentence_index}, rule={issue.rule_id}): "
+            f"{issue.message}\n"
+            f"  Matched: {issue.matched_text}\n"
             f"  Suggestion: {issue.suggestion}\n"
             f"  Excerpt: {issue.excerpt}"
         )

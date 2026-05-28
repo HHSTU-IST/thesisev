@@ -1,0 +1,50 @@
+{
+  "，": {
+    "rule_id": "en_chinese_comma",
+    "message": "英文或术语语境中使用中文逗号，建议统一为英文逗号。",
+    "suggestion": "建议将中文逗号`，`替换为英文逗号`,`。",
+    "severity": "low"
+  },
+  "。": {
+    "rule_id": "en_chinese_period",
+    "message": "英文或术语语境中使用中文句号，建议统一为英文句号。",
+    "suggestion": "建议将中文句号`。`替换为英文句号`.`。",
+    "severity": "low"
+  },
+  "；": {
+    "rule_id": "en_chinese_semicolon",
+    "message": "英文或术语语境中使用中文分号，建议统一为英文分号。",
+    "suggestion": "建议将中文分号`；`替换为英文分号`;`。",
+    "severity": "low"
+  },
+  "：": {
+    "rule_id": "en_chinese_colon",
+    "message": "英文或术语语境中使用中文冒号，建议统一为英文冒号。",
+    "suggestion": "建议将中文冒号`：`替换为英文冒号`:`。",
+    "severity": "low"
+  },
+  "（": {
+    "rule_id": "en_chinese_left_parenthesis",
+    "message": "英文或术语语境中使用中文左括号，建议统一为英文括号。",
+    "suggestion": "建议将中文左括号`（`替换为英文左括号`(`。",
+    "severity": "low"
+  },
+  "）": {
+    "rule_id": "en_chinese_right_parenthesis",
+    "message": "英文或术语语境中使用中文右括号，建议统一为英文括号。",
+    "suggestion": "建议将中文右括号`）`替换为英文右括号`)`。",
+    "severity": "low"
+  },
+  "【": {
+    "rule_id": "en_chinese_left_bracket",
+    "message": "英文或术语语境中使用中文方头括号，建议统一。",
+    "suggestion": "建议根据上下文改为英文方括号`[`或其他合适形式。",
+    "severity": "low"
+  },
+  "】": {
+    "rule_id": "en_chinese_right_bracket",
+    "message": "英文或术语语境中使用中文方头括号，建议统一。",
+    "suggestion": "建议根据上下文改为英文方括号`]`或其他合适形式。",
+    "severity": "low"
+  }
+}

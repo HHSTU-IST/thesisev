@@ -90,10 +90,15 @@ class Issue:
     """A detected writing or formatting issue."""
 
     category: str
+    rule_id: str
     severity: str
     message: str
     suggestion: str
+    section_identifier: str
     section_title: str
+    paragraph_index: int
+    sentence_index: int
+    matched_text: str
     excerpt: str
 
 

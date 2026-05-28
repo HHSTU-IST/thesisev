@@ -17,6 +17,10 @@ from thesisev.resources import load_json_resource
 TECH_KEYWORDS = load_json_resource("tech_keywords.json")
 STOPWORDS = set(load_json_resource("stopwords.json"))
 COLLOQUIAL_PATTERNS = load_json_resource("colloquial_patterns.json")
+SINGLE_CHAR_COLLOQUIAL_ALLOWLIST = {"挺"}
+CHINESE_CONTEXT_PUNCTUATION = load_json_resource("chinese_context_punctuation.json")
+ENGLISH_CONTEXT_PUNCTUATION = load_json_resource("english_context_punctuation.json")
+REPEATED_PUNCTUATION_PATTERN = re.compile(r"([，,。.!！?？；;：:])\1{1,}")
 
 
 def build_statistics(document: ThesisDocument) -> list[Statistic]:
@@ -95,42 +99,64 @@ def detect_issues(document: ThesisDocument) -> list[Issue]:
 
 
 def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
-    """Detect mixed Chinese and English punctuation in the same sentence."""
+    """Detect punctuation issues with sentence-level locations."""
 
     issues: list[Issue] = []
     for section in document.sections:
-        for sentence in section.sentences:
-            has_chinese = bool(re.search(r"[\u4e00-\u9fff]", sentence))
-            english_punct = any(
-                token in sentence for token in (",", ".", ";", ":", "(", ")", "[", "]")
-            )
-            chinese_punct = any(
-                token in sentence
-                for token in ("，", "。", "；", "：", "（", "）", "【", "】")
-            )
-            if has_chinese and english_punct:
-                issues.append(
-                    Issue(
-                        category="标点误用",
-                        severity="medium",
-                        message="中文语境中出现英文标点，可能影响行文一致性。",
-                        suggestion="建议统一替换为中文标点，并检查括号和分号等符号是否符合中文论文规范。",
-                        section_title=section.title,
-                        excerpt=sentence,
+        for paragraph in section.paragraphs:
+            for sentence in paragraph.sentences:
+                sentence_text = sentence.text
+                has_chinese = bool(re.search(r"[\u4e00-\u9fff]", sentence_text))
+                has_latin = bool(re.search(r"[A-Za-z]", sentence_text))
+                if has_chinese:
+                    issues.extend(
+                        detect_chinese_context_punctuation(
+                            section=section,
+                            paragraph_index=paragraph.index,
+                            sentence_index=sentence.index,
+                            sentence_text=sentence_text,
+                        )
                     )
-                )
-                continue
-            if not has_chinese and chinese_punct:
-                issues.append(
-                    Issue(
-                        category="标点误用",
-                        severity="low",
-                        message="英文或代码语境中出现中文标点，建议统一。",
-                        suggestion="建议根据上下文改为英文标点，保持术语、公式或代码片段的一致性。",
-                        section_title=section.title,
-                        excerpt=sentence,
+                    if sentence_text.endswith("."):
+                        issues.append(
+                            build_issue(
+                                category="标点误用",
+                                rule_id="cn_ascii_period",
+                                severity="medium",
+                                message="中文语境中的句末使用了英文句号，建议统一为中文句号。",
+                                suggestion="建议将句末英文句号`.`替换为中文句号`。`。",
+                                section=section,
+                                paragraph_index=paragraph.index,
+                                sentence_index=sentence.index,
+                                matched_text=".",
+                                excerpt=sentence_text,
+                            )
+                        )
+                if not has_chinese and has_latin:
+                    issues.extend(
+                        detect_english_context_punctuation(
+                            section=section,
+                            paragraph_index=paragraph.index,
+                            sentence_index=sentence.index,
+                            sentence_text=sentence_text,
+                        )
                     )
-                )
+                repeated_match = REPEATED_PUNCTUATION_PATTERN.search(sentence_text)
+                if repeated_match is not None:
+                    issues.append(
+                        build_issue(
+                            category="标点误用",
+                            rule_id="repeated_punctuation",
+                            severity="low",
+                            message="检测到连续重复标点，可能影响论文表达的规范性。",
+                            suggestion="建议根据语义只保留一个必要标点，避免连续重复使用。",
+                            section=section,
+                            paragraph_index=paragraph.index,
+                            sentence_index=sentence.index,
+                            matched_text=repeated_match.group(0),
+                            excerpt=sentence_text,
+                        )
+                    )
     return deduplicate_issues(issues)
 
 
@@ -139,20 +165,27 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
 
     issues: list[Issue] = []
     for section in document.sections:
-        for sentence in section.sentences:
-            for phrase, suggestion in COLLOQUIAL_PATTERNS.items():
-                if phrase not in sentence:
-                    continue
-                issues.append(
-                    Issue(
-                        category="口语化表达",
-                        severity="medium",
-                        message=f"检测到口语化表达“{phrase}”，可能不适合正式论文语境。",
-                        suggestion=suggestion,
-                        section_title=section.title,
-                        excerpt=sentence,
+        for paragraph in section.paragraphs:
+            for sentence in paragraph.sentences:
+                for phrase, suggestion in COLLOQUIAL_PATTERNS.items():
+                    if phrase not in sentence.text:
+                        continue
+                    if not should_match_colloquial(phrase, sentence.text):
+                        continue
+                    issues.append(
+                        build_issue(
+                            category="口语化表达",
+                            rule_id=f"colloquial_{phrase}",
+                            severity="medium",
+                            message=f"检测到口语化表达“{phrase}”，可能不适合正式论文语境。",
+                            suggestion=suggestion,
+                            section=section,
+                            paragraph_index=paragraph.index,
+                            sentence_index=sentence.index,
+                            matched_text=phrase,
+                            excerpt=sentence.text,
+                        )
                     )
-                )
     return deduplicate_issues(issues)
 
 
@@ -257,9 +290,16 @@ def split_title_keywords(title: str) -> list[str]:
 def deduplicate_issues(issues: list[Issue]) -> list[Issue]:
     """Deduplicate issues by category and excerpt."""
 
-    unique: dict[tuple[str, str], Issue] = {}
+    unique: dict[tuple[str, str, str, int, int, str], Issue] = {}
     for issue in issues:
-        key = (issue.category, issue.excerpt)
+        key = (
+            issue.category,
+            issue.rule_id,
+            issue.section_identifier,
+            issue.paragraph_index,
+            issue.sentence_index,
+            issue.matched_text,
+        )
         unique.setdefault(key, issue)
     return list(unique.values())
 
@@ -273,3 +313,99 @@ def contains_term(text: str, term: str) -> bool:
         )
         return pattern.search(text) is not None
     return term in text
+
+
+def should_match_colloquial(phrase: str, sentence_text: str) -> bool:
+    """Filter overly broad colloquial rules to reduce obvious false positives."""
+
+    if len(phrase) == 1 and phrase not in SINGLE_CHAR_COLLOQUIAL_ALLOWLIST:
+        return False
+    return phrase in sentence_text
+
+
+def detect_chinese_context_punctuation(
+    section: Section,
+    paragraph_index: int,
+    sentence_index: int,
+    sentence_text: str,
+) -> list[Issue]:
+    """Detect ASCII punctuation used in Chinese sentences."""
+
+    issues: list[Issue] = []
+    for mark, rule in CHINESE_CONTEXT_PUNCTUATION.items():
+        if mark not in sentence_text:
+            continue
+        issues.append(
+            build_issue(
+                category="标点误用",
+                rule_id=rule["rule_id"],
+                severity=rule["severity"],
+                message=rule["message"],
+                suggestion=rule["suggestion"],
+                section=section,
+                paragraph_index=paragraph_index,
+                sentence_index=sentence_index,
+                matched_text=mark,
+                excerpt=sentence_text,
+            )
+        )
+    return issues
+
+
+def detect_english_context_punctuation(
+    section: Section,
+    paragraph_index: int,
+    sentence_index: int,
+    sentence_text: str,
+) -> list[Issue]:
+    """Detect Chinese punctuation used in English-like sentences."""
+
+    issues: list[Issue] = []
+    for mark, rule in ENGLISH_CONTEXT_PUNCTUATION.items():
+        if mark not in sentence_text:
+            continue
+        issues.append(
+            build_issue(
+                category="标点误用",
+                rule_id=rule["rule_id"],
+                severity=rule["severity"],
+                message=rule["message"],
+                suggestion=rule["suggestion"],
+                section=section,
+                paragraph_index=paragraph_index,
+                sentence_index=sentence_index,
+                matched_text=mark,
+                excerpt=sentence_text,
+            )
+        )
+    return issues
+
+
+def build_issue(
+    *,
+    category: str,
+    rule_id: str,
+    severity: str,
+    message: str,
+    suggestion: str,
+    section: Section,
+    paragraph_index: int,
+    sentence_index: int,
+    matched_text: str,
+    excerpt: str,
+) -> Issue:
+    """Build an issue object with stable location metadata."""
+
+    return Issue(
+        category=category,
+        rule_id=rule_id,
+        severity=severity,
+        message=message,
+        suggestion=suggestion,
+        section_identifier=section.identifier,
+        section_title=section.title,
+        paragraph_index=paragraph_index,
+        sentence_index=sentence_index,
+        matched_text=matched_text,
+        excerpt=excerpt,
+    )

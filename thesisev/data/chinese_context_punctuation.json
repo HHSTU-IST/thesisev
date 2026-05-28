@@ -1,0 +1,44 @@
+{
+  ",": {
+    "rule_id": "cn_ascii_comma",
+    "message": "中文语境中使用英文逗号，建议改为中文逗号。",
+    "suggestion": "建议将英文逗号`,`替换为中文逗号`，`。",
+    "severity": "medium"
+  },
+  ";": {
+    "rule_id": "cn_ascii_semicolon",
+    "message": "中文语境中使用英文分号，建议改为中文分号。",
+    "suggestion": "建议将英文分号`;`替换为中文分号`；`。",
+    "severity": "medium"
+  },
+  ":": {
+    "rule_id": "cn_ascii_colon",
+    "message": "中文语境中使用英文冒号，建议改为中文冒号。",
+    "suggestion": "建议将英文冒号`:`替换为中文冒号`：`。",
+    "severity": "low"
+  },
+  "(": {
+    "rule_id": "cn_ascii_left_parenthesis",
+    "message": "中文语境中使用英文左括号，建议统一为中文括号。",
+    "suggestion": "建议将英文左括号`(`替换为中文左括号`（`。",
+    "severity": "low"
+  },
+  ")": {
+    "rule_id": "cn_ascii_right_parenthesis",
+    "message": "中文语境中使用英文右括号，建议统一为中文括号。",
+    "suggestion": "建议将英文右括号`)`替换为中文右括号`）`。",
+    "severity": "low"
+  },
+  "[": {
+    "rule_id": "cn_ascii_left_bracket",
+    "message": "中文语境中使用英文方括号，建议统一为中文书名号或方括号风格。",
+    "suggestion": "建议根据上下文改为更适合中文论文的括号形式。",
+    "severity": "low"
+  },
+  "]": {
+    "rule_id": "cn_ascii_right_bracket",
+    "message": "中文语境中使用英文方括号，建议统一为中文书名号或方括号风格。",
+    "suggestion": "建议根据上下文改为更适合中文论文的括号形式。",
+    "severity": "low"
+  }
+}
