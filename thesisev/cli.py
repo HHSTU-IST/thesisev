@@ -30,6 +30,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print machine-readable JSON instead of the human-readable output.",
     )
+    parser.add_argument(
+        "--provider",
+        default="deepseek",
+        help="LLM provider for comment generation, default is deepseek.",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="Explicit model name. If omitted, a provider-specific default is used.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.2,
+        help="Sampling temperature for LLM comment generation.",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=400,
+        help="Maximum output tokens for generated commentary.",
+    )
     return parser
 
 
@@ -49,7 +71,13 @@ def main() -> int:
             print_structure(document)
         return 0
 
-    result = evaluate_document(source)
+    result = evaluate_document(
+        source,
+        provider=args.provider,
+        model=args.model,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+    )
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     else:

@@ -15,11 +15,21 @@ from thesisev.analyzers import (
     extract_technology_stack,
 )
 from thesisev.commentary import generate_comment
+from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
 
 
-def evaluate_document(path: str | Path) -> EvaluationResult:
+def evaluate_document(
+    path: str | Path,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_tokens: int = 400,
+    timeout: int = 60,
+    model_config: ModelConfig | None = None,
+) -> EvaluationResult:
     """Evaluate a thesis document from a local path."""
 
     document = load_document(path)
@@ -31,6 +41,13 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
     score = calculate_score(issues, len(document.sections))
+    runtime_model_config = model_config or build_model_config(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
     comment, comment_checks = generate_comment(
         title=document.title,
         keywords=keywords,
@@ -40,6 +57,7 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         score=score,
         issues=issues,
         root_sections=document.root_sections,
+        model_config=runtime_model_config,
     )
     return EvaluationResult(
         document=document,
@@ -53,7 +71,11 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         score=score,
         comment=comment,
         comment_checks=comment_checks,
-        metadata={"version": "0.1.0", "topic_analysis": topic_analysis},
+        metadata={
+            "version": "0.1.0",
+            "topic_analysis": topic_analysis,
+            "model": runtime_model_config.to_metadata(),
+        },
     )
 
 

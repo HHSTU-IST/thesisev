@@ -6,6 +6,10 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from thesisev.llm import ModelConfig, create_chat_model
+
 
 def generate_comment(
     title: str,
@@ -16,32 +20,170 @@ def generate_comment(
     score: int,
     issues,
     root_sections,
+    model_config: ModelConfig | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Generate a concise thesis evaluation comment and validation checks."""
 
     focus_keywords = select_comment_keywords(title=title, fallback_keywords=keywords)
+    comment = generate_comment_with_llm(
+        title=title,
+        focus_keywords=focus_keywords,
+        technology_details=technology_details,
+        topic_keywords=topic_keywords,
+        topic_relevance_ratio=topic_relevance_ratio,
+        score=score,
+        issues=issues,
+        root_sections=root_sections,
+        model_config=model_config,
+    )
+    checks = assess_comment(comment=comment, title=title, keywords=focus_keywords, score=score)
+    if not checks["passes_keyword_coverage"]:
+        comment = reinforce_keyword_coverage(comment, checks["missing_keywords"])
+        checks = assess_comment(comment=comment, title=title, keywords=focus_keywords, score=score)
+    return comment, checks
+
+
+def generate_comment_with_llm(
+    *,
+    title: str,
+    focus_keywords: list[str],
+    technology_details,
+    topic_keywords: list[str],
+    topic_relevance_ratio: float,
+    score: int,
+    issues,
+    root_sections,
+    model_config: ModelConfig | None,
+) -> str:
+    """Generate commentary with an LLM and fall back to rule-based text."""
+
+    fallback = build_rule_based_comment(
+        title=title,
+        focus_keywords=focus_keywords,
+        technology_details=technology_details,
+        topic_keywords=topic_keywords,
+        topic_relevance_ratio=topic_relevance_ratio,
+        score=score,
+        issues=issues,
+        root_sections=root_sections,
+    )
+    if model_config is None or not model_config.is_available():
+        return fallback
+
+    prompt = build_comment_prompt(
+        title=title,
+        focus_keywords=focus_keywords,
+        technology_details=technology_details,
+        topic_keywords=topic_keywords,
+        topic_relevance_ratio=topic_relevance_ratio,
+        score=score,
+        issues=issues,
+        root_sections=root_sections,
+    )
+    try:
+        model = create_chat_model(model_config)
+        response = model.invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "你是一名严谨的中文论文评审助手。"
+                        "请根据给定分析结果生成一段 120 到 180 字的论文评价。"
+                        "评价要自然、具体、克制，必须体现评分高低。"
+                        "必须包含至少两个关键词，不要直接复述完整论文标题。"
+                    )
+                ),
+                HumanMessage(content=prompt),
+            ]
+        )
+    except Exception:
+        return fallback
+
+    content = extract_response_text(response).strip()
+    if not content:
+        return fallback
+    return content.replace(title, "、".join(focus_keywords) or "研究主题")
+
+
+def build_rule_based_comment(
+    *,
+    title: str,
+    focus_keywords: list[str],
+    technology_details,
+    topic_keywords: list[str],
+    topic_relevance_ratio: float,
+    score: int,
+    issues,
+    root_sections,
+) -> str:
+    """Build the original deterministic comment as a safe fallback."""
+
     quality_phrase = score_to_phrase(score)
     structure_summary = summarize_structure(root_sections)
     topic_summary = summarize_topic_relevance(topic_keywords, topic_relevance_ratio)
     technology_summary = summarize_technology(technology_details)
     issue_summary = summarize_issues(issues)
     score_summary = summarize_score(score)
-
     focus_text = "、".join(focus_keywords) if focus_keywords else "研究主题"
     comment = (
         f"论文围绕{focus_text}等内容展开，{structure_summary}，整体质量{quality_phrase}。"
         f"{topic_summary}{technology_summary}{issue_summary}{score_summary}当前评分约为 {score} 分。"
     )
-    comment = comment.replace(title, focus_text)
-    checks = assess_comment(
-        comment=comment, title=title, keywords=focus_keywords, score=score
+    return comment.replace(title, focus_text)
+
+
+def build_comment_prompt(
+    *,
+    title: str,
+    focus_keywords: list[str],
+    technology_details,
+    topic_keywords: list[str],
+    topic_relevance_ratio: float,
+    score: int,
+    issues,
+    root_sections,
+) -> str:
+    """Build the LLM prompt from structured thesis signals."""
+
+    grouped: dict[str, list[str]] = defaultdict(list)
+    for item in technology_details:
+        grouped[item.category].append(item.name)
+    technology_summary = "；".join(
+        f"{category}: {', '.join(names[:4])}" for category, names in grouped.items()
+    ) or "未提取到明确技术栈"
+    issue_summary = "；".join(
+        f"{issue.category}/{issue.severity}: {issue.message}" for issue in issues[:6]
+    ) or "未发现明显格式或表达问题"
+    section_summary = "；".join(
+        f"{section.title}({section.ratio * 100:.1f}%)" for section in root_sections[:6]
+    ) or "未识别到稳定章节结构"
+    return (
+        f"论文标题：{title}\n"
+        f"建议覆盖关键词：{'、'.join(focus_keywords) or '研究主题'}\n"
+        f"主题关键词：{'、'.join(topic_keywords) or '无'}\n"
+        f"主题相关内容占比：{topic_relevance_ratio * 100:.1f}%\n"
+        f"章节分布：{section_summary}\n"
+        f"技术栈：{technology_summary}\n"
+        f"问题概览：{issue_summary}\n"
+        f"综合评分：{score} 分\n"
+        "请输出一段中文评语，不要分点。"
     )
-    if not checks["passes_keyword_coverage"]:
-        comment = reinforce_keyword_coverage(comment, checks["missing_keywords"])
-        checks = assess_comment(
-            comment=comment, title=title, keywords=focus_keywords, score=score
-        )
-    return comment, checks
+
+
+def extract_response_text(response: Any) -> str:
+    """Extract text content from a LangChain response object."""
+
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content)
 
 
 def score_to_phrase(score: int) -> str:

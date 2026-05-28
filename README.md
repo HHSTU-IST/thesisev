@@ -2,8 +2,6 @@
 
 Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手，目标是对论文内容、结构和表达进行自动化检查，并基于分析结果生成较为自然的评价意见。
 
-项目当前处于规划与早期实现阶段，重点是先搭建稳定的论文解析流程，再逐步补齐内容分析、纠错和评语生成能力。
-
 ## 技术栈
 
 - 模型调用：LangChain 1.3+
@@ -27,6 +25,25 @@ uv run thesisev examples/sample_thesis.md
 uv run thesisev examples/sample_thesis.docx
 ```
 
+使用 DeepSeek 生成大模型评语：
+
+```bash
+export DEEPSEEK_API_KEY=your_api_key
+uv run thesisev examples/sample_thesis.md --provider deepseek
+```
+
+切换到其他模型提供方：
+
+```bash
+export OPENAI_API_KEY=your_api_key
+uv run thesisev examples/sample_thesis.md --provider openai --model gpt-4o-mini
+```
+
+```bash
+export ANTHROPIC_API_KEY=your_api_key
+uv run thesisev examples/sample_thesis.md --provider anthropic --model claude-3-5-haiku-latest
+```
+
 查看第一阶段的结构化输出：
 
 ```bash
@@ -40,6 +57,68 @@ uv run thesisev examples/sample_thesis.docx --output structure --json
 uv lock
 uv sync
 ```
+
+启动 API 服务：
+
+```bash
+uv run thesisev-api
+```
+
+调用健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+调用论文评价接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "examples/sample_thesis.md",
+    "provider": "deepseek",
+    "model": "deepseek-chat",
+    "temperature": 0.2,
+    "max_tokens": 400
+  }'
+```
+
+上传论文文件进行评价：
+
+```bash
+curl -X POST http://127.0.0.1:8000/evaluate/upload \
+  -F "file=@examples/sample_thesis.md" \
+  -F "provider=deepseek" \
+  -F "model=deepseek-chat" \
+  -F "temperature=0.2" \
+  -F "max_tokens=400"
+```
+
+直接提交论文文本进行评价：
+
+```bash
+curl -X POST http://127.0.0.1:8000/evaluate/text \
+  -F "filename=sample_thesis.md" \
+  -F "text=基于 LangChain 的论文评价助手设计与实现\n第一章 绪论\n本文研究一个用于论文评价的辅助系统。" \
+  -F "provider=deepseek"
+```
+
+调用结构化解析接口：
+
+```bash
+curl -X POST http://127.0.0.1:8000/structure \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "examples/sample_thesis.md"
+  }'
+```
+
+说明：
+
+- 默认评语模型为 `deepseek/deepseek-chat`
+- 当前通过 LangChain 统一接入 `deepseek`、`openai`、`anthropic`、`google_genai`
+- 如果未配置对应 API Key，系统会自动回退到内置规则评语，保证命令仍可执行
 
 ## 项目目标
 
