@@ -291,6 +291,17 @@ button:disabled {
   line-height: 1.7;
 }
 
+.history-item {
+  cursor: pointer;
+  border-radius: 16px;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.history-item:hover {
+  background: rgba(180, 83, 9, 0.06);
+}
+
 .pill-list {
   display: flex;
   flex-wrap: wrap;

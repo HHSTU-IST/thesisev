@@ -1,5 +1,218 @@
 [
   {
+    "id": "320f8d30f2a0472681742cfa8b822514",
+    "created_at": "2026-05-28T17:59:11",
+    "title": "基于 LangChain 的论文评价助手设计与实现",
+    "source_type": "md",
+    "score": 82,
+    "comment": "论文围绕LangChain、论文评价助手设计等内容展开，章节分配略有失衡，整体质量基本清晰。与LangChain、论文评价助手相关的内容占比仍然偏低，存在一定偏题风险。技术方案中已体现出对模型框架的关注，如LangChain等要素。全文表达较为规范，暂未发现明显格式或口语化问题。综合来看，该文整体表现较为稳健，当前评分约为 82 分。",
+    "issue_count": 0,
+    "topic_relevance_ratio": 0.0,
+    "technology_stack": [
+      "LangChain"
+    ],
+    "model": {
+      "provider": "deepseek",
+      "model": "deepseek-chat",
+      "temperature": 0.2,
+      "max_tokens": 400,
+      "timeout": 60,
+      "api_key_env": "DEEPSEEK_API_KEY",
+      "base_url_env": "DEEPSEEK_BASE_URL",
+      "available": false
+    },
+    "result": {
+      "document": {
+        "title": "基于 LangChain 的论文评价助手设计与实现",
+        "source_path": "/var/folders/py/n14256yd5r5ddms88x9bvsv40000gn/T/tmpg6rxzx28.md",
+        "source_type": "md",
+        "front_matter": "",
+        "abstract": "",
+        "cleaned_text": "基于 LangChain 的论文评价助手设计与实现\n第一章 绪论\n\n本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+        "total_word_count": 26,
+        "paragraphs": [
+          {
+            "index": 1,
+            "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+            "sentences": [
+              {
+                "index": 1,
+                "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+              }
+            ],
+            "word_count": 26,
+            "topic_relevance_score": 0.0,
+            "topic_matched_keywords": [],
+            "topic_is_relevant": false
+          }
+        ],
+        "sentences": [
+          "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+        ],
+        "sections": [
+          {
+            "identifier": "1",
+            "level": 1,
+            "title": "绪论",
+            "heading": "第一章 绪论",
+            "numbering": "第一章",
+            "content": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+            "paragraphs": [
+              {
+                "index": 1,
+                "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+                "sentences": [
+                  {
+                    "index": 1,
+                    "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+                  }
+                ],
+                "word_count": 26,
+                "topic_relevance_score": 0.0,
+                "topic_matched_keywords": [],
+                "topic_is_relevant": false
+              }
+            ],
+            "sentences": [
+              "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+            ],
+            "word_count": 26,
+            "children": [],
+            "subtree_word_count": 26,
+            "ratio": 1.0,
+            "parent_ratio": 1.0,
+            "topic_relevance_score": 0.0,
+            "topic_relevant_word_count": 0,
+            "topic_matched_keywords": []
+          }
+        ],
+        "root_sections": [
+          {
+            "identifier": "1",
+            "level": 1,
+            "title": "绪论",
+            "heading": "第一章 绪论",
+            "numbering": "第一章",
+            "content": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+            "paragraphs": [
+              {
+                "index": 1,
+                "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。",
+                "sentences": [
+                  {
+                    "index": 1,
+                    "text": "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+                  }
+                ],
+                "word_count": 26,
+                "topic_relevance_score": 0.0,
+                "topic_matched_keywords": [],
+                "topic_is_relevant": false
+              }
+            ],
+            "sentences": [
+              "本文研究一个用于论文评价的辅助系统，目标是提升初审效率。"
+            ],
+            "word_count": 26,
+            "children": [],
+            "subtree_word_count": 26,
+            "ratio": 1.0,
+            "parent_ratio": 1.0,
+            "topic_relevance_score": 0.0,
+            "topic_relevant_word_count": 0,
+            "topic_matched_keywords": []
+          }
+        ]
+      },
+      "statistics": [
+        {
+          "label": "总字数",
+          "value": "26"
+        },
+        {
+          "label": "章节数",
+          "value": "1"
+        },
+        {
+          "label": "段落数",
+          "value": "1"
+        },
+        {
+          "label": "句子数",
+          "value": "1"
+        },
+        {
+          "label": "主题相关内容占比",
+          "value": "0.0% (0/26)"
+        },
+        {
+          "label": "章节占比 - 绪论",
+          "value": "100.0% (26/26)"
+        },
+        {
+          "label": "主题相关度 - 绪论",
+          "value": "0.0% (0/26)"
+        }
+      ],
+      "issues": [],
+      "keywords": [
+        "LangChain",
+        "论文评价助手"
+      ],
+      "technology_stack": [
+        "LangChain"
+      ],
+      "technology_details": [
+        {
+          "name": "LangChain",
+          "category": "模型框架",
+          "matched_terms": [
+            "langchain",
+            "LangChain"
+          ]
+        }
+      ],
+      "topic_keywords": [
+        "LangChain",
+        "论文评价助手"
+      ],
+      "topic_relevance_ratio": 0.0,
+      "score": 82,
+      "comment": "论文围绕LangChain、论文评价助手设计等内容展开，章节分配略有失衡，整体质量基本清晰。与LangChain、论文评价助手相关的内容占比仍然偏低，存在一定偏题风险。技术方案中已体现出对模型框架的关注，如LangChain等要素。全文表达较为规范，暂未发现明显格式或口语化问题。综合来看，该文整体表现较为稳健，当前评分约为 82 分。",
+      "comment_checks": {
+        "covered_keywords": [
+          "LangChain",
+          "论文评价助手设计"
+        ],
+        "missing_keywords": [],
+        "passes_keyword_coverage": true,
+        "repeats_title": false,
+        "has_score_alignment": true
+      },
+      "metadata": {
+        "version": "0.1.0",
+        "topic_analysis": {
+          "topic_keywords": [
+            "LangChain",
+            "论文评价助手"
+          ],
+          "relevant_word_count": 0,
+          "document_ratio": 0.0
+        },
+        "model": {
+          "provider": "deepseek",
+          "model": "deepseek-chat",
+          "temperature": 0.2,
+          "max_tokens": 400,
+          "timeout": 60,
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url_env": "DEEPSEEK_BASE_URL",
+          "available": false
+        }
+      }
+    }
+  },
+  {
     "created_at": "2026-05-28T17:11:15",
     "title": "基于 LangChain 的论文评价助手设计与实现",
     "source_type": "md",
