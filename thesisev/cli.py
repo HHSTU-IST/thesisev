@@ -7,6 +7,7 @@ import json
 import sys
 from pathlib import Path
 
+from thesisev.analyzers import group_technology_stack
 from thesisev.service import evaluate_document, structure_document
 
 
@@ -71,9 +72,12 @@ def print_report(result) -> None:
     print(f"- {'、'.join(result.keywords) if result.keywords else 'None'}")
     print()
     print("Technology Stack:")
-    print(
-        f"- {'、'.join(result.technology_stack) if result.technology_stack else 'None'}"
-    )
+    if not result.technology_details:
+        print("- None")
+    else:
+        grouped = group_technology_stack(result.technology_details)
+        for category, names in grouped.items():
+            print(f"- {category}: {'、'.join(names)}")
     print()
     print(f"Score: {result.score}")
     print("Comment:")
@@ -114,9 +118,13 @@ def print_section_tree(section, indent: int = 0) -> None:
     """Print a section and its children recursively."""
 
     prefix = "  " * indent
+    ratio_display = f", doc_ratio={section.ratio * 100:.1f}%"
+    if indent > 0:
+        ratio_display += f", parent_ratio={section.parent_ratio * 100:.1f}%"
     print(
         f"{prefix}- [{section.identifier}] {section.title} "
-        f"(L{section.level}, paragraphs={len(section.paragraphs)}, words={section.word_count})"
+        f"(L{section.level}, paragraphs={len(section.paragraphs)}, "
+        f"words={section.word_count}, subtree={section.subtree_word_count}{ratio_display})"
     )
     for child in section.children:
         print_section_tree(child, indent + 1)

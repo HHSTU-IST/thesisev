@@ -24,8 +24,11 @@ __pycache__
 *.log
 *.out
 *.pdf
+
+### Python ###
 *.pt
 *.pth
+*.lock
 
 
 *.docx

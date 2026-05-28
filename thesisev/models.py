@@ -38,7 +38,9 @@ class Section:
     sentences: list[str]
     word_count: int
     children: list[Section] = field(default_factory=list)
+    subtree_word_count: int = 0
     ratio: float = 0.0
+    parent_ratio: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the section to a JSON-friendly dictionary."""
@@ -104,6 +106,15 @@ class Statistic:
 
 
 @dataclass(slots=True)
+class TechnologyStackItem:
+    """A detected technology mention."""
+
+    name: str
+    category: str
+    matched_terms: list[str]
+
+
+@dataclass(slots=True)
 class EvaluationResult:
     """Full evaluation output for a thesis document."""
 
@@ -112,6 +123,7 @@ class EvaluationResult:
     issues: list[Issue]
     keywords: list[str]
     technology_stack: list[str]
+    technology_details: list[TechnologyStackItem]
     score: int
     comment: str
     metadata: dict[str, str] = field(default_factory=dict)
@@ -125,6 +137,9 @@ class EvaluationResult:
             "issues": [asdict(issue) for issue in self.issues],
             "keywords": self.keywords,
             "technology_stack": self.technology_stack,
+            "technology_details": [
+                asdict(technology_item) for technology_item in self.technology_details
+            ],
             "score": self.score,
             "comment": self.comment,
             "metadata": self.metadata,

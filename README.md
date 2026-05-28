@@ -6,20 +6,11 @@ Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手�
 
 ## 技术栈
 
-- Python 3.13
-- LangChain 1.3+
-- FAISS 1.10+
-- FastAPI 0.13+
-- Ruff 0.15+
-- uv 0.11+
-
-其中：
-
-- `LangChain` 用于组织分析链路与模型调用
-- `FAISS` 可用于主题相关度或相似度检索
-- `FastAPI` 用于构建 API 接口和 GUI
-- `Ruff` 用于代码格式化与静态检查
-- `uv` 用于依赖管理与环境隔离
+- 模型调用：LangChain 1.3+
+- 分词：tiktoken 0.13.0+
+- 相似度检索：chromadb 1.5+
+- API 构建：FastAPI 0.13+
+- 依赖管理：uv 0.11+
 
 ## 快速开始
 
@@ -33,6 +24,7 @@ uv pip install -e .
 
 ```bash
 thesisev examples/sample_thesis.md
+thesisev examples/sample_thesis.docx
 ```
 
 查看第一阶段的结构化输出：
@@ -190,9 +182,9 @@ Thesisev 的整体流程可以拆成 4 步：
 
 目标是先形成可用的基础分析结果。
 
-- [ ] 实现章节内容占比统计
-- [ ] 实现章内各部分占比统计
-- [ ] 实现技术栈的基础抽取
+- [x] 实现章节内容占比统计
+- [x] 实现章内各部分占比统计
+- [x] 实现技术栈的基础抽取
 
 ### 第三阶段：纠错能力
 
