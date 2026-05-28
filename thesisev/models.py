@@ -131,7 +131,8 @@ class EvaluationResult:
     technology_details: list[TechnologyStackItem]
     score: int
     comment: str
-    metadata: dict[str, str] = field(default_factory=dict)
+    comment_checks: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the evaluation result to a JSON-friendly dictionary."""
@@ -147,5 +148,6 @@ class EvaluationResult:
             ],
             "score": self.score,
             "comment": self.comment,
+            "comment_checks": self.comment_checks,
             "metadata": self.metadata,
         }

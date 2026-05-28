@@ -29,12 +29,13 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
     score = calculate_score(issues, len(document.sections))
-    comment = generate_comment(
+    comment, comment_checks = generate_comment(
         title=document.title,
         keywords=keywords,
-        technology_stack=technology_stack,
+        technology_details=technology_details,
         score=score,
-        issue_count=len(issues),
+        issues=issues,
+        root_sections=document.root_sections,
     )
     return EvaluationResult(
         document=document,
@@ -45,6 +46,7 @@ def evaluate_document(path: str | Path) -> EvaluationResult:
         technology_details=technology_details,
         score=score,
         comment=comment,
+        comment_checks=comment_checks,
         metadata={"version": "0.1.0"},
     )
 

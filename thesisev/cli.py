@@ -82,6 +82,16 @@ def print_report(result) -> None:
     print(f"Score: {result.score}")
     print("Comment:")
     print(result.comment)
+    print("Comment Checks:")
+    print(
+        f"- keyword_coverage: {'ok' if result.comment_checks.get('passes_keyword_coverage') else 'needs review'}"
+    )
+    print(
+        f"- title_repetition: {'ok' if not result.comment_checks.get('repeats_title') else 'needs review'}"
+    )
+    print(
+        f"- score_alignment: {'ok' if result.comment_checks.get('has_score_alignment') else 'needs review'}"
+    )
     print()
     print("Issues:")
     if not result.issues:

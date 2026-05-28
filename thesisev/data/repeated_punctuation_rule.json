@@ -1,0 +1,7 @@
+{
+  "pattern": "([，,。.!！?？；;：:])\\1{1,}",
+  "rule_id": "repeated_punctuation",
+  "severity": "low",
+  "message": "检测到连续重复标点，可能影响论文表达的规范性。",
+  "suggestion": "建议根据语义只保留一个必要标点，避免连续重复使用。"
+}

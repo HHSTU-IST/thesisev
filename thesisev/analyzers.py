@@ -17,10 +17,10 @@ from thesisev.resources import load_json_resource
 TECH_KEYWORDS = load_json_resource("tech_keywords.json")
 STOPWORDS = set(load_json_resource("stopwords.json"))
 COLLOQUIAL_PATTERNS = load_json_resource("colloquial_patterns.json")
-SINGLE_CHAR_COLLOQUIAL_ALLOWLIST = {"挺"}
 CHINESE_CONTEXT_PUNCTUATION = load_json_resource("chinese_context_punctuation.json")
 ENGLISH_CONTEXT_PUNCTUATION = load_json_resource("english_context_punctuation.json")
-REPEATED_PUNCTUATION_PATTERN = re.compile(r"([，,。.!！?？；;：:])\1{1,}")
+REPEATED_PUNCTUATION_RULE = load_json_resource("repeated_punctuation_rule.json")
+REPEATED_PUNCTUATION_PATTERN = re.compile(REPEATED_PUNCTUATION_RULE["pattern"])
 
 
 def build_statistics(document: ThesisDocument) -> list[Statistic]:
@@ -146,10 +146,10 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
                     issues.append(
                         build_issue(
                             category="标点误用",
-                            rule_id="repeated_punctuation",
-                            severity="low",
-                            message="检测到连续重复标点，可能影响论文表达的规范性。",
-                            suggestion="建议根据语义只保留一个必要标点，避免连续重复使用。",
+                            rule_id=REPEATED_PUNCTUATION_RULE["rule_id"],
+                            severity=REPEATED_PUNCTUATION_RULE["severity"],
+                            message=REPEATED_PUNCTUATION_RULE["message"],
+                            suggestion=REPEATED_PUNCTUATION_RULE["suggestion"],
                             section=section,
                             paragraph_index=paragraph.index,
                             sentence_index=sentence.index,
@@ -167,18 +167,18 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
     for section in document.sections:
         for paragraph in section.paragraphs:
             for sentence in paragraph.sentences:
-                for phrase, suggestion in COLLOQUIAL_PATTERNS.items():
+                for phrase, rule in COLLOQUIAL_PATTERNS.items():
                     if phrase not in sentence.text:
                         continue
-                    if not should_match_colloquial(phrase, sentence.text):
+                    if not should_match_colloquial(phrase, sentence.text, rule):
                         continue
                     issues.append(
                         build_issue(
                             category="口语化表达",
-                            rule_id=f"colloquial_{phrase}",
-                            severity="medium",
-                            message=f"检测到口语化表达“{phrase}”，可能不适合正式论文语境。",
-                            suggestion=suggestion,
+                            rule_id=rule["rule_id"],
+                            severity=rule["severity"],
+                            message=build_colloquial_message(phrase, rule),
+                            suggestion=build_colloquial_suggestion(rule),
                             section=section,
                             paragraph_index=paragraph.index,
                             sentence_index=sentence.index,
@@ -315,12 +315,34 @@ def contains_term(text: str, term: str) -> bool:
     return term in text
 
 
-def should_match_colloquial(phrase: str, sentence_text: str) -> bool:
+def should_match_colloquial(
+    phrase: str, sentence_text: str, rule: dict[str, object]
+) -> bool:
     """Filter overly broad colloquial rules to reduce obvious false positives."""
 
-    if len(phrase) == 1 and phrase not in SINGLE_CHAR_COLLOQUIAL_ALLOWLIST:
+    if len(phrase) == 1 and not bool(rule.get("allow_single_char", False)):
         return False
     return phrase in sentence_text
+
+
+def build_colloquial_message(phrase: str, rule: dict[str, object]) -> str:
+    """Build a colloquial issue message from rule config."""
+
+    message = rule.get("message")
+    if isinstance(message, str) and message:
+        return message
+    return f"检测到口语化表达“{phrase}”，可能不适合正式论文语境。"
+
+
+def build_colloquial_suggestion(rule: dict[str, object]) -> str:
+    """Build a colloquial issue suggestion from rule config."""
+
+    suggestion = str(rule["suggestion"])
+    replacements = rule.get("replacement_examples", [])
+    if isinstance(replacements, list) and replacements:
+        example_text = "、".join(str(item) for item in replacements)
+        return f"{suggestion} 可参考：{example_text}。"
+    return suggestion
 
 
 def detect_chinese_context_punctuation(
