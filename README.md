@@ -61,7 +61,19 @@ uv sync
 启动 API 服务：
 
 ```bash
-uv run thesisev-api
+./scripts/start_api.sh
+```
+
+指定主机和端口启动：
+
+```bash
+HOST=0.0.0.0 PORT=9000 ./scripts/start_api.sh
+```
+
+打开内置 UI：
+
+```bash
+open http://127.0.0.1:8000
 ```
 
 调用健康检查：

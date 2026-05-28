@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Thesisev UI</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+
+<body>
+  <main class="shell">
+    <section class="hero">
+      <p class="eyebrow">THESISEV</p>
+      <h1>基于 FastAPI 的论文评价工作台</h1>
+      <p class="lead">
+        上传论文或直接粘贴文本，选择大模型，快速得到结构分析、问题清单和总评语。
+      </p>
+    </section>
+
+    <section class="panel">
+      <form id="evaluate-form" class="form-grid">
+        <label class="field field-span-2">
+          <span>论文文本</span>
+          <textarea id="text" name="text" rows="10" placeholder="直接粘贴论文内容；如果上传文件，这里可以留空。"></textarea>
+        </label>
+
+        <label class="field">
+          <span>上传文件</span>
+          <input id="file" name="file" type="file" accept=".md,.txt,.docx" />
+        </label>
+
+        <label class="field">
+          <span>文件名</span>
+          <input id="filename" name="filename" type="text" value="submission.md" placeholder="submission.md" />
+        </label>
+
+        <label class="field">
+          <span>模型提供方</span>
+          <select id="provider" name="provider">
+            <option value="deepseek">deepseek</option>
+            <option value="openai">openai</option>
+            <option value="anthropic">anthropic</option>
+            <option value="google_genai">google_genai</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>模型名称</span>
+          <input id="model" name="model" type="text" value="deepseek-chat" placeholder="deepseek-chat" />
+        </label>
+
+        <label class="field">
+          <span>Temperature</span>
+          <input id="temperature" name="temperature" type="number" min="0" max="2" step="0.1" value="0.2" />
+        </label>
+
+        <label class="field">
+          <span>Max Tokens</span>
+          <input id="max_tokens" name="max_tokens" type="number" min="64" max="4000" step="1" value="400" />
+        </label>
+
+        <div class="actions field-span-2">
+          <button id="submit-button" type="submit">开始评价</button>
+          <p id="status" class="status">等待输入</p>
+        </div>
+      </form>
+    </section>
+
+      <section id="results" class="results hidden">
+        <article class="panel result-card">
+          <div class="result-header">
+            <h2>总评语</h2>
+            <div class="result-actions">
+              <span id="score-badge" class="score-badge">--</span>
+              <button id="export-json" type="button" class="ghost-button">导出 JSON</button>
+              <button id="export-md" type="button" class="ghost-button">导出 Markdown</button>
+            </div>
+          </div>
+          <p id="comment" class="comment"></p>
+          <div id="model-meta" class="meta-line"></div>
+        </article>
+
+      <article class="panel result-card">
+        <h2>基础信息</h2>
+        <div class="kv-grid">
+          <div><span>标题</span><strong id="doc-title">-</strong></div>
+          <div><span>类型</span><strong id="doc-type">-</strong></div>
+          <div><span>章节数</span><strong id="doc-sections">-</strong></div>
+          <div><span>主题相关占比</span><strong id="topic-ratio">-</strong></div>
+        </div>
+      </article>
+
+        <article class="panel result-card">
+          <h2>章节树</h2>
+          <div id="section-tree" class="tree"></div>
+        </article>
+
+        <article class="panel result-card">
+          <h2>统计结果</h2>
+          <ul id="statistics-list" class="list"></ul>
+        </article>
+
+        <article class="panel result-card">
+          <h2>识别问题</h2>
+          <div id="issue-filters" class="filter-row"></div>
+          <ul id="issues-list" class="list"></ul>
+        </article>
+
+      <article class="panel result-card">
+        <h2>技术栈</h2>
+        <ul id="tech-list" class="pill-list"></ul>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

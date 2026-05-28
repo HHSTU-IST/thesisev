@@ -6,9 +6,13 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field
 import uvicorn
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.requests import Request
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 from thesisev.service import evaluate_document, structure_document
 
@@ -48,6 +52,16 @@ app = FastAPI(
     version="0.1.0",
     description="API for structured thesis analysis and multi-model commentary.",
 )
+BASE_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+def index(request: Request) -> HTMLResponse:
+    """Render the built-in thesis evaluation UI."""
+
+    return templates.TemplateResponse(request, "index.html", {})
 
 
 @app.get("/health")
