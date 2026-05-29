@@ -1,115 +1,61 @@
 # Thesisev
 
-Thesisev 是一个面向论文初审与辅助评价场景的论文分析助手，目标是对论文内容、结构和表达进行自动化检查，并基于分析结果生成较为自然的评价意见。
+一个面向论文初审的轻量评审工具，支持：
 
-## 技术栈
+- 解析 `md`、`txt`、`docx`
+- 统计章节结构与主题相关度
+- 检测部分标点和口语化问题
+- 使用 LangChain 生成评语
+- 提供 CLI、FastAPI 和内置 Web UI
 
-- 模型调用：LangChain 1.3+
-- 分词：tiktoken 0.13.0+
-- 相似度检索：chromadb 1.5+
-- API 构建：FastAPI 0.13+
-- 依赖管理：uv 0.11+
-
-## 快速开始
-
-安装：
+## 安装
 
 ```bash
 uv sync
 ```
 
-运行基础评估：
+## CLI
+
+基础评估：
 
 ```bash
 uv run thesisev examples/sample_thesis.md
-uv run thesisev examples/sample_thesis.docx
 ```
 
-使用 DeepSeek 生成大模型评语：
+输出结构化结果：
+
+```bash
+uv run thesisev examples/sample_thesis.md --output structure --json
+```
+
+使用 DeepSeek 生成评语：
 
 ```bash
 export DEEPSEEK_API_KEY=your_api_key
 uv run thesisev examples/sample_thesis.md --provider deepseek
 ```
 
-切换到其他模型提供方：
+## API 与 UI
 
-```bash
-export OPENAI_API_KEY=your_api_key
-uv run thesisev examples/sample_thesis.md --provider openai --model gpt-4o-mini
-```
-
-```bash
-export ANTHROPIC_API_KEY=your_api_key
-uv run thesisev examples/sample_thesis.md --provider anthropic --model claude-3-5-haiku-latest
-```
-
-查看第一阶段的结构化输出：
-
-```bash
-uv run thesisev examples/sample_thesis.md --output structure
-uv run thesisev examples/sample_thesis.docx --output structure --json
-```
-
-更新依赖与锁文件：
-
-```bash
-uv lock
-uv sync
-```
-
-启动 API 服务：
+启动服务：
 
 ```bash
 ./scripts/start_api.sh
 ```
 
-指定主机和端口启动：
-
-```bash
-HOST=0.0.0.0 PORT=9000 ./scripts/start_api.sh
-```
-
-打开内置 UI：
+打开 UI：
 
 ```bash
 open http://127.0.0.1:8000
 ```
 
-说明：每次通过 API 或 UI 完成评审后，最近记录会自动写入本地历史，并展示在首页“最近评审”区域。
-
-调用健康检查：
+健康检查：
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-调用论文评价接口：
-
-```bash
-curl -X POST http://127.0.0.1:8000/evaluate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "path": "examples/sample_thesis.md",
-    "provider": "deepseek",
-    "model": "deepseek-chat",
-    "temperature": 0.2,
-    "max_tokens": 400
-  }'
-```
-
-上传论文文件进行评价：
-
-```bash
-curl -X POST http://127.0.0.1:8000/evaluate/upload \
-  -F "file=@examples/sample_thesis.md" \
-  -F "provider=deepseek" \
-  -F "model=deepseek-chat" \
-  -F "temperature=0.2" \
-  -F "max_tokens=400"
-```
-
-直接提交论文文本进行评价：
+提交文本评估：
 
 ```bash
 curl -X POST http://127.0.0.1:8000/evaluate/text \
@@ -118,258 +64,22 @@ curl -X POST http://127.0.0.1:8000/evaluate/text \
   -F "provider=deepseek"
 ```
 
-调用结构化解析接口：
+上传文件评估：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/structure \
-  -H "Content-Type: application/json" \
-  -d '{
-    "path": "examples/sample_thesis.md"
-  }'
+curl -X POST http://127.0.0.1:8000/evaluate/upload \
+  -F "file=@examples/sample_thesis.md" \
+  -F "provider=deepseek"
 ```
 
-说明：
-
-- 默认评语模型为 `deepseek/deepseek-chat`
-- 当前通过 LangChain 统一接入 `deepseek`、`openai`、`anthropic`、`google_genai`
-- 如果未配置对应 API Key，系统会自动回退到内置规则评语，保证命令仍可执行
-
-## 项目目标
-
-Thesisev 希望解决以下问题：
-
-- 自动读取并拆解论文结构
-- 统计章节与小节内容分布
-- 提取论文涉及的技术栈
-- 识别与论文主题相关或偏离主题的内容
-- 检测常见格式与表达问题
-- 根据题目、分析结果和分数生成评语
-
-## 核心能力
-
-### 内容提取与统计
-
-- [ ] 提取论文使用的技术栈
-- [ ] 统计全文中每章内容占比
-- [ ] 统计每章中各部分内容占比
-- [x] 统计与论文主题相关的内容占比
-
-### 格式纠错
-
-- [ ] 检测中英文标点误用
-
-### 内容纠错
-
-- [ ] 定位口语化片段
-
-### 评语生成
-
-评语生成需要满足以下要求：
-
-- 包含题目中的多个关键字
-- 不直接复述题目
-- 与给定分数相呼应
-
-## 典型处理流程
-
-Thesisev 的整体流程可以拆成 4 步：
-
-1. 读取论文文本并完成预处理
-2. 识别章节、小节、段落和句子结构
-3. 执行统计分析、格式检查和内容检查
-4. 汇总分析结果并生成最终评语
-
-## 模块设计
-
-### 输入与预处理
-
-负责论文文本的读取、清洗和标准化，为后续分析提供统一输入。
-
-建议首批优先支持以下输入格式：
-
-- `docx`
-
-后续可扩展：
-
-- `pdf`
-
-该模块需要完成的工作包括：
-
-- 清洗空行、页眉页脚和明显噪声
-- 按章节、段落、句子切分文本
-- 建立统一的论文数据结构
-
-### 结构识别与统计
-
-负责识别论文的层级结构，并给出可量化的篇幅统计。
-
-主要任务包括：
-
-- 识别一级标题、二级标题和三级标题
-- 建立章节树
-- 统计每章字数、段落数和句子数
-- 计算章节占全文比例
-- 计算章内各节占比
-
-### 内容分析
-
-负责从论文中提取主题信息和技术信息，并判断内容分布是否合理。
-
-主要任务包括：
-
-- 提取技术栈关键词
-- 对技术栈进行归类与去重
-- 提取论文主题关键词
-- 判断段落或小节与主题的相关度
-- 汇总主题相关内容占比
-
-### 纠错模块
-
-负责发现论文中的表达和格式问题。
-
-主要任务包括：
-
-- 检测中英文标点混用或误用
-- 识别学术写作中不合适的口语化表达
-- 输出问题位置、问题类型和修改建议
-
-### 评语生成
-
-负责将分析结果转化为可读性较高的评价文本。
-
-输入建议包括：
-
-- 论文题目
-- 基础统计结果
-- 技术栈提取结果
-- 问题清单
-- 分数或等级
-
-输出目标包括：
-
-- 语言自然
-- 重点明确
-- 与分数一致
-- 避免机械复述题目
-
-## 建议的数据流
-
-为了让模块之间更容易协作，建议统一围绕“结构化论文对象”展开。一个简化的数据对象可以包含：
-
-- `title`
-- `abstract`
-- `chapters`
-- `sections`
-- `paragraphs`
-- `sentences`
-- `statistics`
-- `issues`
-
-这样可以让统计、纠错、主题分析和评语生成共享同一份中间结果。
-
-## 开发路线
-
-### 第一阶段：基础结构化
-
-目标是把论文稳定解析成结构化数据。
-
-- [x] 实现文本读取与预处理
-- [x] 实现章节和小节识别
-- [x] 实现段落与句子切分
-- [x] 输出统一论文数据结构
-
-### 第二阶段：基础统计分析
-
-目标是先形成可用的基础分析结果。
-
-- [x] 实现章节内容占比统计
-- [x] 实现章内各部分占比统计
-- [x] 实现技术栈的基础抽取
-
-### 第三阶段：纠错能力
-
-目标是输出可解释的问题清单。
-
-- [x] 实现中英文标点误用检测
-- [x] 实现口语化片段定位
-- [x] 输出问题位置与修改建议
-
-### 第四阶段：评语生成
-
-目标是形成可直接使用的评价结果。
-
-- [x] 基于题目和分析结果生成评语
-- [x] 增加关键词覆盖校验
-- [x] 增加“避免复述题目”校验
-- [x] 增加评语与分数一致性校验
-
-### 第五阶段：增强能力
-
-目标是提升结果质量和鲁棒性。
-
-- [ ] 接入向量检索或 embedding 相似度分析
-- [ ] 优化主题相关度判断
-- [ ] 降低纠错误报率
-- [ ] 补充样例论文与自动化测试
-
-## MVP 范围
-
-首个可用版本建议聚焦以下能力：
-
-- 支持 `docx` 论文输入
-- 输出章节树
-- 输出章节与小节占比
-- 检测中英文标点误用
-- 生成基础评语
-
-这样可以先完成一条最小闭环：
-
-`输入论文 -> 解析结构 -> 输出统计 -> 输出问题 -> 生成评语`
-
-## 验收标准
-
-在 MVP 阶段，可以使用以下标准判断是否达到可用状态：
-
-- 能稳定解析一篇论文并识别章节结构
-- 章节占比统计结果总和合理
-- 能定位部分明显的标点误用
-- 能识别基础口语化表达
-- 评语能覆盖题目关键字，且不直接复述题目
-
-## 当前待明确的问题
-
-为避免后续返工，建议尽早明确以下约束：
-
-- 首批支持的论文输入格式是什么
-- “技术栈”具体包含哪些类别
-- “主题相关度”采用规则、向量还是模型判定
-- 是否需要输出数值分数，还是只生成评语
-- 最终交付形式是 CLI、API 还是 Web 服务
-
-## 开发待办
-
-- [ ] 设计论文统一数据结构
-- [ ] 实现论文文本读取与预处理
-- [ ] 实现章节与小节识别
-- [ ] 实现章节字数与占比统计
-- [ ] 实现章内各部分占比统计
-- [ ] 实现技术栈抽取、归类与去重
-- [ ] 实现论文主题关键词提取
-- [ ] 实现主题相关内容占比计算
-- [ ] 实现中英文标点误用检测规则
-- [ ] 实现口语化表达检测逻辑
-- [ ] 设计评语生成模板或 Prompt
-- [ ] 实现评语质量校验逻辑
-- [ ] 补充测试样例与验证流程
+最近历史：
+
+```bash
+curl http://127.0.0.1:8000/history
+```
 
 ## 说明
 
-当前 README 以项目规划和能力拆解为主，后续在代码结构逐步稳定后，可以继续补充：
-
-- 安装方式
-- 使用示例
-- 命令行或 API 文档
-- 测试方法
-- 贡献指南
-
-当前版本中的基础规则词表已经抽离到 `thesisev/data/*.json`，包括技术栈关键词、停用词和口语化表达规则，便于后续直接维护和扩展。
+- 默认模型为 `deepseek/deepseek-chat`
+- 未配置对应 API Key 时，会回退到内置规则评语
+- 最近评审会保存到本地 `thesisev/data/history.json`

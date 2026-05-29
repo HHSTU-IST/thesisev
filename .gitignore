@@ -33,4 +33,7 @@ __pycache__
 *.docx
 
 articles
+examples
+
+history.json
 test.*

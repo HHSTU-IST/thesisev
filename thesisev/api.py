@@ -14,7 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from thesisev.history import append_history, find_history_entry, read_history
+from thesisev.history import append_history, read_history
 from thesisev.service import evaluate_document, structure_document
 
 
@@ -50,7 +50,6 @@ class ApiResponse(BaseModel):
         "evaluate_upload",
         "evaluate_text",
         "history",
-        "history_detail",
     ]
     data: dict[str, Any]
 
@@ -84,17 +83,6 @@ def history() -> ApiResponse:
     """Return recent compact evaluation history."""
 
     return ApiResponse(ok=True, mode="history", data={"items": read_history()})
-
-
-@app.get("/history/{entry_id}", response_model=ApiResponse)
-def history_detail(entry_id: str) -> ApiResponse:
-    """Return a single stored history entry."""
-
-    entry = find_history_entry(entry_id)
-    if entry is None:
-        msg = f"history entry not found: {entry_id}"
-        raise HTTPException(status_code=404, detail=msg)
-    return ApiResponse(ok=True, mode="history_detail", data=entry)
 
 
 @app.post("/evaluate", response_model=ApiResponse)

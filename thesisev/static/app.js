@@ -97,29 +97,6 @@ async function loadHistory() {
   renderHistory(payload.data?.items || []);
 }
 
-async function loadHistoryEntry(entryId) {
-  setLoading(true, "正在载入历史结果...");
-  try {
-    const response = await fetch(`/history/${entryId}`);
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || "历史记录加载失败");
-    }
-    if (!payload.data?.result) {
-      throw new Error("该历史记录缺少可回放结果");
-    }
-    state.result = payload.data.result;
-    state.activeIssueFilter = "all";
-    state.activeIssueKey = null;
-    state.activeSectionId =
-      payload.data.result.document.root_sections[0]?.identifier || null;
-    renderResults();
-    setLoading(false, "历史结果已恢复");
-  } catch (error) {
-    setLoading(false, error.message || "历史记录加载失败");
-  }
-}
-
 function renderResults() {
   const data = state.result;
   if (!data) {
@@ -396,12 +373,6 @@ function renderHistory(items) {
   }
   items.forEach((item) => {
     const li = document.createElement("li");
-    if (item.id && item.result) {
-      li.className = "history-item";
-      li.addEventListener("click", () => {
-        void loadHistoryEntry(item.id);
-      });
-    }
     li.innerHTML =
       `<strong>${item.title}</strong>` +
       `<div class="history-subline">${item.created_at} · ${item.source_type} · ${item.score} 分 · ` +

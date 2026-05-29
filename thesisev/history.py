@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,18 +14,16 @@ HISTORY_PATH = HISTORY_DIR / "history.json"
 MAX_HISTORY_ITEMS = 20
 
 
-def append_history(result: EvaluationResult) -> dict[str, Any]:
-    """Append an evaluation snapshot to local history."""
+def append_history(result: EvaluationResult) -> None:
+    """Append a compact evaluation summary to local history."""
 
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     items = read_history()
-    entry = build_history_entry(result)
-    items.insert(0, entry)
+    items.insert(0, build_history_entry(result))
     HISTORY_PATH.write_text(
         json.dumps(items[:MAX_HISTORY_ITEMS], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return entry
 
 
 def read_history() -> list[dict[str, Any]]:
@@ -37,21 +34,10 @@ def read_history() -> list[dict[str, Any]]:
     return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
 
 
-def find_history_entry(entry_id: str) -> dict[str, Any] | None:
-    """Find a single history entry by id."""
-
-    for item in read_history():
-        if item.get("id") == entry_id:
-            return item
-    return None
-
-
 def build_history_entry(result: EvaluationResult) -> dict[str, Any]:
-    """Build a serialized history entry with full replay payload."""
+    """Build a compact serialized history entry."""
 
-    full_result = result.to_dict()
     return {
-        "id": uuid.uuid4().hex,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "title": result.document.title,
         "source_type": result.document.source_type,
@@ -61,5 +47,4 @@ def build_history_entry(result: EvaluationResult) -> dict[str, Any]:
         "topic_relevance_ratio": result.topic_relevance_ratio,
         "technology_stack": result.technology_stack,
         "model": result.metadata.get("model", {}),
-        "result": full_result,
     }
