@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from defusedxml import ElementTree
 
@@ -26,6 +26,14 @@ SECTION_PATTERN = re.compile(
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+DOCX_DOCUMENT_XML = "word/document.xml"
+MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
+MAX_DOCX_MEMBER_COUNT = 512
+MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
+MAX_DOCX_MEMBER_BYTES = 30 * 1024 * 1024
+MAX_DOCX_DOCUMENT_XML_BYTES = 10 * 1024 * 1024
+MAX_DOCX_COMPRESSION_RATIO = 100
+ZIP_READ_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -43,12 +51,13 @@ def load_document(path: str | Path) -> ThesisDocument:
     """Load and parse a thesis from markdown or docx."""
 
     source_path = Path(path)
-    raw_text = read_source_text(source_path)
-    format_snapshot = (
-        read_docx_format_snapshot(source_path)
-        if source_path.suffix.lower() == ".docx"
-        else {}
-    )
+    if source_path.suffix.lower() == ".docx":
+        document_xml = read_docx_document_xml(source_path)
+        raw_text = read_docx_text_from_xml(document_xml)
+        format_snapshot = read_docx_format_snapshot_from_xml(document_xml)
+    else:
+        raw_text = read_source_text(source_path)
+        format_snapshot = {}
     cleaned_text = clean_text(raw_text)
     lines = [line.strip() for line in cleaned_text.splitlines()]
     title = next((line for line in lines if line), source_path.stem)
@@ -95,8 +104,12 @@ def read_source_text(path: Path) -> str:
 def read_docx_text(path: Path) -> str:
     """Extract plain text from a docx file using the OpenXML document body."""
 
-    with ZipFile(path) as archive:
-        xml_bytes = archive.read("word/document.xml")
+    return read_docx_text_from_xml(read_docx_document_xml(path))
+
+
+def read_docx_text_from_xml(xml_bytes: bytes) -> str:
+    """Extract plain text from an already validated document.xml payload."""
+
     root = ElementTree.fromstring(xml_bytes)
     paragraphs: list[str] = []
     for paragraph in root.findall(".//w:p", WORD_NAMESPACE):
@@ -110,8 +123,13 @@ def read_docx_text(path: Path) -> str:
 def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
     """Extract a compact formatting snapshot from a docx file."""
 
-    with ZipFile(path) as archive:
-        document_xml = ElementTree.fromstring(archive.read("word/document.xml"))
+    return read_docx_format_snapshot_from_xml(read_docx_document_xml(path))
+
+
+def read_docx_format_snapshot_from_xml(xml_bytes: bytes) -> dict[str, Any]:
+    """Extract a compact formatting snapshot from validated document.xml bytes."""
+
+    document_xml = ElementTree.fromstring(xml_bytes)
 
     paragraphs: list[dict[str, Any]] = []
     tables = [
@@ -139,6 +157,103 @@ def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
         "tables": tables,
         "sections": sections,
     }
+
+
+def read_docx_document_xml(path: Path) -> bytes:
+    """Safely read the main DOCX XML member with size limits."""
+
+    validate_docx_archive_size(path)
+    try:
+        with ZipFile(path) as archive:
+            validate_docx_archive_members(archive)
+            document_info = get_docx_document_xml_info(archive)
+            validate_docx_member_size(document_info, max_size=MAX_DOCX_DOCUMENT_XML_BYTES)
+            return read_zip_member_limited(
+                archive, document_info, max_size=MAX_DOCX_DOCUMENT_XML_BYTES
+            )
+    except BadZipFile as exc:
+        msg = "invalid docx archive"
+        raise ValueError(msg) from exc
+
+
+def validate_docx_archive_size(path: Path) -> None:
+    """Reject archive files that are too large before opening them."""
+
+    if path.stat().st_size > MAX_DOCX_ARCHIVE_BYTES:
+        msg = (
+            "docx archive is too large; "
+            f"maximum size is {MAX_DOCX_ARCHIVE_BYTES // (1024 * 1024)} MiB"
+        )
+        raise ValueError(msg)
+
+
+def validate_docx_archive_members(archive: ZipFile) -> None:
+    """Validate zip metadata before any member is decompressed."""
+
+    members = archive.infolist()
+    if len(members) > MAX_DOCX_MEMBER_COUNT:
+        msg = f"docx archive has too many zip members; maximum is {MAX_DOCX_MEMBER_COUNT}"
+        raise ValueError(msg)
+
+    total_uncompressed = 0
+    for member in members:
+        if member.is_dir():
+            continue
+        validate_docx_member_size(member, max_size=MAX_DOCX_MEMBER_BYTES)
+        total_uncompressed += member.file_size
+        if total_uncompressed > MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES:
+            msg = (
+                "docx archive expands to too much data; "
+                f"maximum is {MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES // (1024 * 1024)} MiB"
+            )
+            raise ValueError(msg)
+
+
+def get_docx_document_xml_info(archive: ZipFile) -> ZipInfo:
+    """Return the central-directory entry for word/document.xml."""
+
+    try:
+        return archive.getinfo(DOCX_DOCUMENT_XML)
+    except KeyError as exc:
+        msg = "docx archive is missing word/document.xml"
+        raise ValueError(msg) from exc
+
+
+def validate_docx_member_size(member: ZipInfo, *, max_size: int) -> None:
+    """Reject suspicious or oversized zip members before decompression."""
+
+    if member.file_size > max_size:
+        msg = (
+            f"docx member {member.filename} is too large; "
+            f"maximum size is {max_size // (1024 * 1024)} MiB"
+        )
+        raise ValueError(msg)
+    if member.file_size and member.compress_size == 0:
+        msg = f"docx member {member.filename} has suspicious compression metadata"
+        raise ValueError(msg)
+    if member.compress_size:
+        ratio = member.file_size / member.compress_size
+        if ratio > MAX_DOCX_COMPRESSION_RATIO:
+            msg = f"docx member {member.filename} has suspicious compression ratio"
+            raise ValueError(msg)
+
+
+def read_zip_member_limited(archive: ZipFile, member: ZipInfo, *, max_size: int) -> bytes:
+    """Read a zip member in chunks while enforcing an output limit."""
+
+    chunks: list[bytes] = []
+    total_size = 0
+    with archive.open(member) as source:
+        while chunk := source.read(ZIP_READ_CHUNK_BYTES):
+            total_size += len(chunk)
+            if total_size > max_size:
+                msg = (
+                    f"docx member {member.filename} is too large; "
+                    f"maximum size is {max_size // (1024 * 1024)} MiB"
+                )
+                raise ValueError(msg)
+            chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def extract_docx_paragraph_snapshot(paragraph: ElementTree.Element) -> dict[str, Any]:

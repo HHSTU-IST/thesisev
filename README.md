@@ -15,7 +15,7 @@
 - 本地格式检测与评分：自动统计章节占比、主题相关度、关键词和技术栈，并由本地程序识别格式问题；格式评价仅做本地复核，不依赖上传规则文件。
 - 大模型内容评价：基于 LangChain 接入多种大模型，默认使用 `deepseek/deepseek-chat` 生成论文内容评价，LLM 负责内容评价与评分。
 - 预设规则读取：评分标准与格式要求均从程序内置 `json` 文件读取，UI 提供评分预设下拉菜单，选择后自动加载对应的评分标准与格式要求。
-- 历史与复用：自动保存最近评审记录，并记住上次上传的论文。
+- 历史记录：自动保存最近评审记录，并展示最近上传状态。
 - 多入口使用：同时提供 CLI、FastAPI API 和内置 Web UI，便于命令行调用、接口集成和页面操作。
 
 ## 快速开始
@@ -203,12 +203,12 @@ curl http://127.0.0.1:8000/last-upload
 - 返回结果中可通过 `metadata.score_source`、`metadata.comment_source` 和 `metadata.evaluation_roles` 判断职责来源
 - 最近评审会写入本地 `data/history.json`
 - 现在只支持上传 `md` 或 `docx` 文件评审
-- 上传过一次后，页面刷新或再次评审时会自动复用上次上传的论文
+- 每次通过 Web UI 或 `/evaluate/upload` 评审都必须显式上传论文文件；系统不会复用上次上传内容
 
 ## 目录说明
 
 - `config/`：静态配置文件，包括规则库、关键词库和 `provider_env.toml`
-- `data/`：运行时数据，包括历史记录、上次上传记录和上传缓存文件
+- `data/`：运行时数据，包括历史记录、最近上传状态和上传缓存文件
 - `static/`：前端静态资源，包括样式和交互脚本
 - `templates/`：FastAPI 内置 UI 的 HTML 模板
 - `thesisev/`：核心 Python 包，包括解析、分析、本地评分、内容评价生成、CLI 和 API
@@ -225,7 +225,7 @@ flowchart LR
     C["核心能力层<br/>论文解析 / 本地格式检测 / 本地评分 / 内容评价"]
     M["模型层<br/>LangChain 多模型接入<br/>默认 DeepSeek"]
     CFG["配置层<br/>规则库 / 模型配置"]
-    D["数据层<br/>历史记录 / 上次上传文件"]
+    D["数据层<br/>历史记录 / 最近上传状态"]
 
     U --> A
     A --> C
@@ -247,13 +247,13 @@ sequenceDiagram
     participant Config as 本地配置
     participant Data as 本地数据
 
-    User->>UI: 上传论文 / 评分标准 / 格式要求
+    User->>UI: 上传论文并选择内置评分预设
     UI->>API: 发起评审请求
-    API->>Data: 读取当前上传或复用上次上传
+    API->>Data: 保存当前上传文件与历史状态
     API->>Core: 执行解析、统计、本地格式检测与评分
     Core->>LLM: 生成论文内容评价
     Core->>Config: 读取规则与模型配置
-    API->>Data: 保存历史记录与上传状态
+    API->>Data: 保存历史记录
     API-->>UI: 返回结构化评审结果
     UI-->>User: 展示内容评价、格式检测、评分标准、格式要求
 ```

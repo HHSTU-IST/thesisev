@@ -7,7 +7,6 @@ const providerDefaults = {
 
 const state = {
   result: null,
-  lastUpload: null,
   activeIssueFilter: "all",
   activeSectionId: null,
   activeIssueKey: null,
@@ -23,7 +22,6 @@ const statusNode = document.getElementById("status");
 const resultsNode = document.getElementById("results");
 const exportMdButton = document.getElementById("export-md");
 const refreshHistoryButton = document.getElementById("refresh-history");
-const lastUploadListNode = document.getElementById("last-upload-list");
 const reuseHintNode = document.getElementById("reuse-hint");
 
 providerInput.addEventListener("change", () => {
@@ -36,7 +34,6 @@ refreshHistoryButton.addEventListener("click", () => {
 });
 
 void loadHistory();
-void loadLastUpload();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -69,9 +66,10 @@ async function submitEvaluation() {
   formData.append("max_tokens", document.getElementById("max_tokens").value);
 
   const file = fileInput.files[0];
-  if (file) {
-    formData.append("file", file);
+  if (!file) {
+    throw new Error("请先选择论文文件");
   }
+  formData.append("file", file);
   return postForm("/evaluate/upload", formData);
 }
 
@@ -91,13 +89,6 @@ async function loadHistory() {
   const response = await fetch("/history");
   const payload = await response.json();
   renderHistory(payload.data?.items || []);
-}
-
-async function loadLastUpload() {
-  const response = await fetch("/last-upload");
-  const payload = await response.json();
-  state.lastUpload = payload.data?.items || null;
-  renderLastUpload(state.lastUpload);
 }
 
 function renderResults() {
@@ -132,10 +123,6 @@ function renderResults() {
   renderSectionTree(data.document.root_sections);
   renderRubric(data.metadata?.rubric || null);
   renderFormatRequirements(data.metadata?.format_requirements || null);
-  if (data.metadata?.last_upload) {
-    state.lastUpload = data.metadata.last_upload;
-    renderLastUpload(state.lastUpload);
-  }
 }
 
 function renderStatistics(statistics) {
@@ -349,24 +336,6 @@ function renderHistory(items) {
     li.appendChild(buildSubline(item.comment, "history-subline"));
     node.appendChild(li);
   });
-}
-
-function renderLastUpload(lastUpload) {
-  lastUploadListNode.innerHTML = "";
-  const entry = lastUpload?.thesis || null;
-  if (!entry || !entry.available) {
-    const li = document.createElement("li");
-    li.textContent = "论文: 暂无";
-    lastUploadListNode.appendChild(li);
-    reuseHintNode.textContent = "当前还没有可复用的上传记录，请先至少上传一次论文文件。";
-    return;
-  }
-
-  const li = document.createElement("li");
-  li.textContent = `论文: ${entry.filename} · ${entry.size} bytes · ${entry.updated_at}`;
-  lastUploadListNode.appendChild(li);
-  reuseHintNode.textContent =
-    "未重新选择论文文件时，系统会自动复用上次上传文件。重新上传后会覆盖上次论文记录。";
 }
 
 function renderRubric(rubric) {

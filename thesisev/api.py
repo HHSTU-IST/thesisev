@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 import uuid
 from datetime import UTC, datetime
 from json import JSONDecodeError
@@ -13,7 +12,7 @@ from typing import Any, Literal
 import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.requests import Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -33,6 +32,73 @@ from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
 from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
 from thesisev.scoring import DEFAULT_THESIS_TECH_RUBRIC, calculate_score_report
+
+
+class UploadRequestTooLarge(Exception):
+    """Raised when an upload request exceeds the configured body limit."""
+
+
+class EvaluateUploadSizeLimitMiddleware:
+    """Limit /evaluate/upload request bodies before multipart parsing."""
+
+    def __init__(self, app, *, max_body_bytes: int) -> None:
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http" or scope.get("path") != "/evaluate/upload":
+            await self.app(scope, receive, send)
+            return
+
+        if self.is_oversized_by_header(scope):
+            await self.send_too_large_response(scope, receive, send)
+            return
+
+        received = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_body_bytes:
+                    raise UploadRequestTooLarge
+            return message
+
+        async def limited_send(message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, limited_send)
+        except UploadRequestTooLarge:
+            if response_started:
+                raise
+            await self.send_too_large_response(scope, receive, send)
+
+    def is_oversized_by_header(self, scope) -> bool:
+        """Check Content-Length when the client provides one."""
+
+        headers = dict(scope.get("headers") or [])
+        content_length = headers.get(b"content-length")
+        if not content_length:
+            return False
+        try:
+            return int(content_length) > self.max_body_bytes
+        except ValueError:
+            return False
+
+    async def send_too_large_response(self, scope, receive, send) -> None:
+        """Send a standard 413 response."""
+
+        response = JSONResponse(
+            status_code=413,
+            content={"detail": build_upload_too_large_message()},
+        )
+        await response(scope, receive, send)
 
 
 class EvaluateRequest(BaseModel):
@@ -74,7 +140,6 @@ class ApiResponse(BaseModel):
         "structure",
         "evaluate_upload",
         "history",
-        "last_upload",
     ]
     data: dict[str, Any]
 
@@ -87,10 +152,16 @@ app = FastAPI(
 HISTORY_DIR = data_dir()
 HISTORY_PATH = HISTORY_DIR / "history.json"
 UPLOAD_DIR = HISTORY_DIR / "uploads"
-LAST_UPLOAD_PATH = HISTORY_DIR / "last_upload.json"
 MAX_HISTORY_ITEMS = 20
+MAX_EVALUATE_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_EVALUATE_UPLOAD_BODY_BYTES = MAX_EVALUATE_UPLOAD_BYTES + 1024 * 1024
+UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
 templates = Jinja2Templates(directory=str(templates_dir()))
 app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
+app.add_middleware(
+    EvaluateUploadSizeLimitMiddleware,
+    max_body_bytes=MAX_EVALUATE_UPLOAD_BODY_BYTES,
+)
 
 EVALUATE_UPLOAD_FILE_DEFAULT = File(default=None)
 EVALUATE_UPLOAD_PRESET_DEFAULT = Form(default="thesis_tech")
@@ -130,17 +201,6 @@ def history() -> ApiResponse:
     """Return recent compact evaluation history."""
 
     return ApiResponse(ok=True, mode="history", data={"items": read_history()})
-
-
-@app.get("/last-upload", response_model=ApiResponse)
-def last_upload() -> ApiResponse:
-    """Return the last uploaded thesis, rubric, and format files."""
-
-    return ApiResponse(
-        ok=True,
-        mode="last_upload",
-        data={"items": build_public_last_upload_manifest()},
-    )
 
 
 @app.post("/evaluate", response_model=ApiResponse)
@@ -201,24 +261,28 @@ async def evaluate_upload(
     try:
         rubric_filename, format_filename = resolve_preset_files(preset)
         source = await resolve_thesis_source(file)
-        rubric_summary = load_builtin_rubric_summary(rubric_filename)
-        format_summary = load_builtin_format_requirements_summary(format_filename)
-        result = evaluate_document(
-            source,
-            provider=provider,
-            model=model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            rubric_filename=rubric_filename,
-            rubric=rubric_summary,
-            format_requirements=format_summary,
-        )
+        try:
+            rubric_summary = load_builtin_rubric_summary(rubric_filename)
+            format_summary = load_builtin_format_requirements_summary(format_filename)
+            result = evaluate_document(
+                source,
+                provider=provider,
+                model=model,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                rubric_filename=rubric_filename,
+                rubric=rubric_summary,
+                format_requirements=format_summary,
+            )
+        finally:
+            cleanup_upload_file(source)
         if rubric_summary is not None:
             result.metadata["rubric"] = rubric_summary
         if format_summary is not None:
             result.metadata["format_requirements"] = format_summary
         result.metadata["preset"] = preset
-        result.metadata["last_upload"] = build_public_last_upload_manifest()
+    except HTTPException:
+        raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -272,28 +336,17 @@ def resolve_preset_files(preset: str) -> tuple[str, str | None]:
     return config["rubric"], config["format"] or None
 
 
-async def save_upload_to_tempfile(file: UploadFile, *, suffix: str) -> Path:
-    """Persist an uploaded file into a temporary path."""
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
-        content = await file.read()
-        temp_file.write(content)
-        return Path(temp_file.name)
-
-
 async def resolve_thesis_source(file: UploadFile | None) -> Path:
-    """Resolve the thesis source path from the current or last upload."""
+    """Resolve the thesis source path from the current upload."""
 
-    if file is not None:
-        filename = file.filename or "upload.md"
-        suffix = Path(filename).suffix.lower() or ".md"
-        validate_suffix(suffix)
-        return await store_upload_file(file, slot="thesis", default_name="upload.md")
+    if file is None:
+        msg = "请上传论文文件"
+        raise ValueError(msg)
 
-    return load_last_upload_path(
-        slot="thesis",
-        missing_message="请先上传论文文件，之后系统会自动复用上次上传内容",
-    )
+    filename = file.filename or "upload.md"
+    suffix = Path(filename).suffix.lower() or ".md"
+    validate_suffix(suffix)
+    return await store_upload_file(file, slot="thesis", default_name="upload.md")
 
 
 def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
@@ -319,42 +372,56 @@ async def store_upload_file(
     default_name: str,
     validate_json_suffix: bool = False,
 ) -> Path:
-    """Persist an uploaded file for reuse across page refreshes."""
+    """Persist the current uploaded file for evaluation."""
 
     filename = file.filename or default_name
     suffix = Path(filename).suffix.lower() or Path(default_name).suffix.lower()
     if validate_json_suffix:
         validate_rubric_suffix(suffix)
-    content = await file.read()
-    if not content:
-        msg = f"{slot.replace('_', ' ')} file is empty"
-        raise ValueError(msg)
 
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    for existing in UPLOAD_DIR.glob(f"last_{slot}.*"):
-        existing.unlink()
+    temp_path = UPLOAD_DIR / f".upload_{slot}_{uuid.uuid4().hex}{suffix}.tmp"
+    stored_path = UPLOAD_DIR / f"{slot}_{uuid.uuid4().hex}{suffix}"
+    written = 0
+    try:
+        with temp_path.open("wb") as output:
+            while chunk := await file.read(UPLOAD_READ_CHUNK_BYTES):
+                written += len(chunk)
+                if written > MAX_EVALUATE_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=build_upload_too_large_message(),
+                    )
+                output.write(chunk)
+        if written == 0:
+            msg = f"{slot.replace('_', ' ')} file is empty"
+            raise ValueError(msg)
 
-    stored_path = UPLOAD_DIR / f"last_{slot}{suffix}"
-    stored_path.write_bytes(content)
-    update_last_upload_manifest(slot=slot, filename=filename, stored_path=stored_path)
+        temp_path.replace(stored_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
     return stored_path
 
 
-def load_last_upload_path(slot: str, *, missing_message: str) -> Path | None:
-    """Load a persisted upload path when available."""
+def cleanup_upload_file(path: Path) -> None:
+    """Remove a per-request uploaded file after evaluation."""
 
-    entry = read_last_upload_manifest().get(slot)
-    if not entry:
-        if missing_message:
-            raise ValueError(missing_message)
-        return None
+    try:
+        resolved_path = path.resolve()
+        upload_root = UPLOAD_DIR.resolve()
+    except OSError:
+        return
+    if resolved_path == upload_root or upload_root not in resolved_path.parents:
+        return
+    path.unlink(missing_ok=True)
 
-    stored_path = resolve_upload_manifest_path(slot, entry)
-    if not stored_path.exists():
-        if missing_message:
-            raise ValueError(missing_message)
-        return None
-    return stored_path
+
+def build_upload_too_large_message() -> str:
+    """Build a consistent upload size-limit error message."""
+
+    max_mib = MAX_EVALUATE_UPLOAD_BYTES // (1024 * 1024)
+    return f"uploaded thesis file is too large; maximum size is {max_mib} MiB"
 
 
 def parse_rubric_file(path: Path, *, source_name: str) -> dict[str, Any]:
@@ -383,19 +450,6 @@ def parse_format_requirements_file(path: Path, *, source_name: str) -> dict[str,
         )
     items = normalize_format_requirements_payload(payload)
     return {"items": items, "item_count": len(items), "source_name": source_name}
-
-
-async def parse_json_upload_payload(file: UploadFile, *, name: str) -> Any:
-    """Parse a UTF-8 JSON upload payload."""
-
-    try:
-        return json.loads((await file.read()).decode("utf-8"))
-    except UnicodeDecodeError as exc:
-        msg = f"{name} JSON must be utf-8 encoded"
-        raise ValueError(msg) from exc
-    except JSONDecodeError as exc:
-        msg = f"{name} JSON is invalid"
-        raise ValueError(msg) from exc
 
 
 def parse_json_file(path: Path, *, name: str) -> Any:
@@ -732,84 +786,3 @@ def build_history_entry(result) -> dict[str, Any]:
         "technology_stack": result.technology_stack,
         "model": result.metadata.get("model", {}),
     }
-
-
-def read_last_upload_manifest() -> dict[str, dict[str, Any]]:
-    """Read the last-upload manifest from disk."""
-
-    if not LAST_UPLOAD_PATH.exists():
-        return {}
-    manifest = json.loads(LAST_UPLOAD_PATH.read_text(encoding="utf-8"))
-    normalized_manifest = normalize_last_upload_manifest(manifest)
-    if normalized_manifest != manifest:
-        LAST_UPLOAD_PATH.write_text(
-            json.dumps(normalized_manifest, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-    return normalized_manifest
-
-
-def update_last_upload_manifest(*, slot: str, filename: str, stored_path: Path) -> None:
-    """Update the persisted metadata for the last uploaded file in a slot."""
-
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    manifest = read_last_upload_manifest()
-    manifest[slot] = {
-        "filename": filename,
-        "stored_path": str(stored_path),
-        "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
-        "size": stored_path.stat().st_size,
-        "suffix": stored_path.suffix.lower(),
-    }
-    LAST_UPLOAD_PATH.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def build_public_last_upload_manifest() -> dict[str, dict[str, Any] | None]:
-    """Build a safe manifest for UI display."""
-
-    manifest = read_last_upload_manifest()
-    public_manifest: dict[str, dict[str, Any] | None] = {}
-    for slot in ("thesis",):
-        entry = manifest.get(slot)
-        if not entry:
-            public_manifest[slot] = None
-            continue
-        stored_path = resolve_upload_manifest_path(slot, entry)
-        if not stored_path.exists():
-            public_manifest[slot] = None
-            continue
-        public_manifest[slot] = {
-            "filename": entry["filename"],
-            "updated_at": entry["updated_at"],
-            "size": entry["size"],
-            "suffix": entry["suffix"],
-            "available": True,
-        }
-    return public_manifest
-
-
-def normalize_last_upload_manifest(
-    manifest: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    """Normalize persisted upload paths after layout changes."""
-
-    normalized: dict[str, dict[str, Any]] = {}
-    for slot, entry in manifest.items():
-        normalized_entry = dict(entry)
-        normalized_entry["stored_path"] = str(resolve_upload_manifest_path(slot, entry))
-        normalized[slot] = normalized_entry
-    return normalized
-
-
-def resolve_upload_manifest_path(slot: str, entry: dict[str, Any]) -> Path:
-    """Resolve the current stored path for a manifest entry."""
-
-    stored_path = Path(entry["stored_path"])
-    if stored_path.exists():
-        return stored_path
-
-    suffix = entry.get("suffix", stored_path.suffix)
-    return UPLOAD_DIR / f"last_{slot}{suffix}"
