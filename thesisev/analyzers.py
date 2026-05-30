@@ -17,14 +17,14 @@ from thesisev.models import (
 )
 from thesisev.resources import load_json_resource
 
-TECH_KEYWORDS = load_json_resource("tech_keywords.json")
+KEYWORDS_TECH = load_json_resource("keywords_tech.json")
 STOPWORDS = set(load_json_resource("stopwords.json"))
 TOPIC_NOISE_TERMS = load_json_resource("topic_noise_terms.json")
-COLLOQUIAL_PATTERNS = load_json_resource("colloquial_patterns.json")
-CHINESE_CONTEXT_PUNCTUATION = load_json_resource("chinese_context_punctuation.json")
-ENGLISH_CONTEXT_PUNCTUATION = load_json_resource("english_context_punctuation.json")
-REPEATED_PUNCTUATION_RULE = load_json_resource("repeated_punctuation_rule.json")
-REPEATED_PUNCTUATION_PATTERN = re.compile(REPEATED_PUNCTUATION_RULE["pattern"])
+COLLOQUIAL = load_json_resource("colloquial.json")
+PUNCTUATION_CHINESE = load_json_resource("punctuation_chinese.json")
+PUNCTUATION_ENGLISH = load_json_resource("punctuation_english.json")
+PUNCTUATION_REPEATED = load_json_resource("punctuation_repeated.json")
+REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
 TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 TOPIC_NOISE_GENERIC_TERMS = set(TOPIC_NOISE_TERMS["generic_terms"])
 TOPIC_NOISE_GENERIC_FRAGMENTS = tuple(TOPIC_NOISE_TERMS["generic_fragments"])
@@ -85,7 +85,7 @@ def extract_technology_details(document: ThesisDocument) -> list[TechnologyStack
     """Extract categorized technology names with keyword matching."""
 
     found: list[TechnologyStackItem] = []
-    for entry in TECH_KEYWORDS:
+    for entry in KEYWORDS_TECH:
         matched_terms = [
             alias
             for alias in entry["aliases"]
@@ -156,7 +156,7 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
                 has_latin = bool(re.search(r"[A-Za-z]", sentence_text))
                 if has_chinese:
                     issues.extend(
-                        detect_chinese_context_punctuation(
+                        detect_punctuation_chinese(
                             section=section,
                             paragraph_index=paragraph.index,
                             sentence_index=sentence.index,
@@ -180,7 +180,7 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
                         )
                 if not has_chinese and has_latin:
                     issues.extend(
-                        detect_english_context_punctuation(
+                        detect_punctuation_english(
                             section=section,
                             paragraph_index=paragraph.index,
                             sentence_index=sentence.index,
@@ -192,10 +192,10 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
                     issues.append(
                         build_issue(
                             category="标点误用",
-                            rule_id=REPEATED_PUNCTUATION_RULE["rule_id"],
-                            severity=REPEATED_PUNCTUATION_RULE["severity"],
-                            message=REPEATED_PUNCTUATION_RULE["message"],
-                            suggestion=REPEATED_PUNCTUATION_RULE["suggestion"],
+                            rule_id=PUNCTUATION_REPEATED["rule_id"],
+                            severity=PUNCTUATION_REPEATED["severity"],
+                            message=PUNCTUATION_REPEATED["message"],
+                            suggestion=PUNCTUATION_REPEATED["suggestion"],
                             section=section,
                             paragraph_index=paragraph.index,
                             sentence_index=sentence.index,
@@ -213,7 +213,7 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
     for section in document.sections:
         for paragraph in section.paragraphs:
             for sentence in paragraph.sentences:
-                for phrase, rule in COLLOQUIAL_PATTERNS.items():
+                for phrase, rule in COLLOQUIAL.items():
                     if phrase not in sentence.text:
                         continue
                     if not should_match_colloquial(phrase, sentence.text, rule):
@@ -1090,13 +1090,13 @@ SECTION_HEADING_TERMS = {
 }
 
 
-def detect_chinese_context_punctuation(
+def detect_punctuation_chinese(
     section: Section, paragraph_index: int, sentence_index: int, sentence_text: str
 ) -> list[Issue]:
     """Detect ASCII punctuation used in Chinese sentences."""
 
     issues: list[Issue] = []
-    for mark, rule in CHINESE_CONTEXT_PUNCTUATION.items():
+    for mark, rule in PUNCTUATION_CHINESE.items():
         if mark not in sentence_text:
             continue
         issues.append(
@@ -1116,13 +1116,13 @@ def detect_chinese_context_punctuation(
     return issues
 
 
-def detect_english_context_punctuation(
+def detect_punctuation_english(
     section: Section, paragraph_index: int, sentence_index: int, sentence_text: str
 ) -> list[Issue]:
     """Detect Chinese punctuation used in English-like sentences."""
 
     issues: list[Issue] = []
-    for mark, rule in ENGLISH_CONTEXT_PUNCTUATION.items():
+    for mark, rule in PUNCTUATION_ENGLISH.items():
         if mark not in sentence_text:
             continue
         issues.append(

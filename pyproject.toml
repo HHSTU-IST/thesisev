@@ -26,8 +26,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["thesisev"]
 include = [
-    "data/*.json",
-    "data/*.toml",
+    "config/*.json",
+    "config/*.toml",
     "templates/*.html",
     "static/*.css",
     "static/*.js",

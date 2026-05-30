@@ -20,6 +20,12 @@ def data_dir() -> Path:
     return project_root() / "data"
 
 
+def config_dir() -> Path:
+    """Return the static configuration directory."""
+
+    return project_root() / "config"
+
+
 def static_dir() -> Path:
     """Return the static assets directory."""
 
