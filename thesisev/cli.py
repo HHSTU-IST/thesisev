@@ -16,9 +16,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="thesisev",
-        description="Analyze a thesis-like file and produce a structure or evaluation report.",
+        description="Analyze a thesis file and produce a structure or evaluation report.",
     )
-    parser.add_argument("path", help="Path to a txt, markdown, or docx thesis file.")
+    parser.add_argument("path", help="Path to a md or docx thesis file.")
     parser.add_argument(
         "--output",
         choices=("report", "structure"),
@@ -63,6 +63,8 @@ def main() -> int:
     source = Path(args.path)
     if not source.exists():
         parser.error(f"file not found: {source}")
+    if not source.is_file():
+        parser.error(f"path is not a file: {source}")
     if args.output == "structure":
         document = structure_document(source)
         if args.json:

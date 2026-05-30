@@ -38,7 +38,7 @@ class HeadingMatch:
 
 
 def load_document(path: str | Path) -> ThesisDocument:
-    """Load and parse a thesis from txt, markdown, or docx."""
+    """Load and parse a thesis from markdown or docx."""
 
     source_path = Path(path)
     raw_text = read_source_text(source_path)
@@ -72,7 +72,7 @@ def read_source_text(path: Path) -> str:
     """Read thesis text from a supported source file."""
 
     suffix = path.suffix.lower()
-    if suffix in {".txt", ".md"}:
+    if suffix == ".md":
         return path.read_text(encoding="utf-8")
     if suffix == ".docx":
         return read_docx_text(path)
@@ -146,15 +146,8 @@ def parse_sections(text: str) -> tuple[str, list[Section]]:
         )
 
     if not headings:
-        section = build_section(
-            identifier="1",
-            level=1,
-            title="全文",
-            heading="全文",
-            numbering="",
-            content=text,
-        )
-        return "", [section]
+        msg = "markdown file must contain explicit heading markers"
+        raise ValueError(msg)
 
     first_heading_line = headings[0].line_index
     front_matter = "\n".join(lines[:first_heading_line]).strip()
@@ -190,10 +183,6 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
         numbering = match.group("prefix").strip()
         title = match.group("title").strip()
         return infer_level(numbering), title, numbering, line
-
-    if len(line) <= 24 and not line.endswith(("。", ".", "!", "！", "?", "？")):
-        if not any(char in line for char in ("，", ",", "；", ";")):
-            return 1, line, "", line
     return None
 
 

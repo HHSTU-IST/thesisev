@@ -10,6 +10,8 @@ uv sync
 
 ## CLI
 
+只接受 `md` 或 `docx` 文件输入：
+
 ```bash
 uv run thesisev examples/sample_thesis.md
 uv run thesisev examples/sample_thesis.md --output structure
@@ -34,4 +36,4 @@ curl http://127.0.0.1:8000/history
 - 默认模型：`deepseek/deepseek-chat`
 - 未配置 API Key 时自动回退到规则评语
 - 最近评审会写入本地 `thesisev/data/history.json`
-- 现在只支持上传文件评审
+- 现在只支持上传 `md` 或 `docx` 文件评审

@@ -36,7 +36,7 @@ from thesisev.parser import load_document
 class EvaluateRequest(BaseModel):
     """Request body for thesis evaluation."""
 
-    path: str = Field(description="Local path to a txt, md, or docx thesis file.")
+    path: str = Field(description="Local path to a md or docx thesis file.")
     provider: str = Field(default="deepseek", description="LLM provider name.")
     model: str | None = Field(
         default=None, description="Explicit model name for the selected provider."
@@ -52,7 +52,7 @@ class EvaluateRequest(BaseModel):
 class StructureRequest(BaseModel):
     """Request body for structure-only parsing."""
 
-    path: str = Field(description="Local path to a txt, md, or docx thesis file.")
+    path: str = Field(description="Local path to a md or docx thesis file.")
 
 
 class ApiResponse(BaseModel):
@@ -185,7 +185,7 @@ def validate_source_path(path: str) -> Path:
 def validate_suffix(suffix: str) -> None:
     """Validate supported file suffixes."""
 
-    if suffix not in {".txt", ".md", ".docx"}:
+    if suffix not in {".md", ".docx"}:
         msg = f"unsupported file type: {suffix or 'unknown'}"
         raise HTTPException(status_code=400, detail=msg)
 
