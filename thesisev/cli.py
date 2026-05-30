@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from thesisev.analyzers import group_technology_stack
-from thesisev.service import evaluate_document, structure_document
+from thesisev.api import evaluate_document, structure_document
 
 
 def build_parser() -> argparse.ArgumentParser:

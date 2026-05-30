@@ -15,13 +15,10 @@ const state = {
 const form = document.getElementById("evaluate-form");
 const providerInput = document.getElementById("provider");
 const modelInput = document.getElementById("model");
-const textInput = document.getElementById("text");
 const fileInput = document.getElementById("file");
-const filenameInput = document.getElementById("filename");
 const submitButton = document.getElementById("submit-button");
 const statusNode = document.getElementById("status");
 const resultsNode = document.getElementById("results");
-const exportJsonButton = document.getElementById("export-json");
 const exportMdButton = document.getElementById("export-md");
 const refreshHistoryButton = document.getElementById("refresh-history");
 
@@ -29,7 +26,6 @@ providerInput.addEventListener("change", () => {
   modelInput.value = providerDefaults[providerInput.value] || "";
 });
 
-exportJsonButton.addEventListener("click", () => exportResult("json"));
 exportMdButton.addEventListener("click", () => exportResult("md"));
 refreshHistoryButton.addEventListener("click", () => {
   void loadHistory();
@@ -49,7 +45,8 @@ form.addEventListener("submit", async (event) => {
     state.result = response.data;
     state.activeIssueFilter = "all";
     state.activeIssueKey = null;
-    state.activeSectionId = response.data.document.root_sections[0]?.identifier || null;
+    state.activeSectionId =
+      response.data.document.root_sections[0]?.identifier || null;
     renderResults();
     void loadHistory();
     setLoading(false, "分析完成");
@@ -66,17 +63,11 @@ async function submitEvaluation() {
   formData.append("max_tokens", document.getElementById("max_tokens").value);
 
   const file = fileInput.files[0];
-  const text = textInput.value.trim();
   if (file) {
     formData.append("file", file);
     return postForm("/evaluate/upload", formData);
   }
-  if (!text) {
-    throw new Error("请先粘贴论文文本或上传文件");
-  }
-  formData.append("text", text);
-  formData.append("filename", filenameInput.value || "submission.md");
-  return postForm("/evaluate/text", formData);
+  throw new Error("请先上传论文文件");
 }
 
 async function postForm(url, formData) {
@@ -125,7 +116,6 @@ function renderResults() {
   renderIssues(data.issues);
   renderTechList(data.technology_stack);
   renderSectionTree(data.document.root_sections);
-  renderFocusPanel();
 }
 
 function renderStatistics(statistics) {
@@ -192,7 +182,6 @@ function renderIssues(issues) {
       state.activeSectionId = issue.section_identifier;
       renderIssues(issues);
       renderSectionTree(state.result.document.root_sections);
-      renderFocusPanel();
     });
     node.appendChild(li);
   });
@@ -239,7 +228,6 @@ function buildSectionNode(section) {
     state.activeIssueKey = null;
     renderSectionTree(state.result.document.root_sections);
     renderIssues(state.result.issues);
-    renderFocusPanel();
   });
   item.appendChild(button);
 
@@ -252,104 +240,6 @@ function buildSectionNode(section) {
     item.appendChild(childList);
   }
   return item;
-}
-
-function renderFocusPanel() {
-  const node = document.getElementById("focus-panel");
-  node.innerHTML = "";
-  if (!state.result) {
-    return;
-  }
-
-  const activeIssue = findActiveIssue();
-  if (activeIssue) {
-    renderIssueFocus(node, activeIssue);
-    return;
-  }
-
-  const activeSection = findSectionByIdentifier(
-    state.result.document.sections,
-    state.activeSectionId,
-  );
-  if (activeSection) {
-    renderSectionFocus(node, activeSection);
-    return;
-  }
-
-  node.innerHTML =
-    '<p class="focus-empty">点击章节树或问题项后，这里会显示对应的段落和上下文。</p>';
-}
-
-function renderIssueFocus(node, issue) {
-  const block = document.createElement("div");
-  block.className = "focus-block";
-  block.innerHTML =
-    `<div class="focus-kicker">问题定位</div>` +
-    `<h3>${issue.section_identifier} ${issue.section_title}</h3>` +
-    `<p class="focus-summary">${issue.message}</p>` +
-    `<p class="focus-meta">规则: ${issue.rule_id} · 严重程度: ${issue.severity}</p>` +
-    `<div class="excerpt-card">${highlightText(issue.excerpt, issue.matched_text)}</div>` +
-    `<p class="focus-meta">建议：${issue.suggestion}</p>`;
-  node.appendChild(block);
-}
-
-function renderSectionFocus(node, section) {
-  const block = document.createElement("div");
-  block.className = "focus-block";
-  const previewParagraphs = section.paragraphs.slice(0, 3);
-  block.innerHTML =
-    `<div class="focus-kicker">章节详情</div>` +
-    `<h3>${section.identifier} ${section.title}</h3>` +
-    `<p class="focus-summary">章节占比 ${(section.ratio * 100).toFixed(1)}%，` +
-    `主题相关 ${(section.topic_relevance_score * 100).toFixed(1)}%，` +
-    `共 ${section.word_count} 字。</p>`;
-  previewParagraphs.forEach((paragraph) => {
-    const p = document.createElement("p");
-    p.className = "focus-paragraph";
-    p.textContent = paragraph.text;
-    block.appendChild(p);
-  });
-  if (!previewParagraphs.length) {
-    const empty = document.createElement("p");
-    empty.className = "focus-empty";
-    empty.textContent = "该章节暂无可展示段落。";
-    block.appendChild(empty);
-  }
-  node.appendChild(block);
-}
-
-function buildIssueKey(issue) {
-  return [
-    issue.section_identifier,
-    issue.paragraph_index,
-    issue.sentence_index,
-    issue.rule_id,
-    issue.matched_text,
-  ].join(":");
-}
-
-function findActiveIssue() {
-  if (!state.result || !state.activeIssueKey) {
-    return null;
-  }
-  return (
-    state.result.issues.find((issue) => buildIssueKey(issue) === state.activeIssueKey) ||
-    null
-  );
-}
-
-function findSectionByIdentifier(sections, identifier) {
-  return sections.find((section) => section.identifier === identifier) || null;
-}
-
-function highlightText(text, matchedText) {
-  if (!matchedText || !text.includes(matchedText)) {
-    return escapeHtml(text);
-  }
-  return escapeHtml(text).replaceAll(
-    escapeHtml(matchedText),
-    `<mark>${escapeHtml(matchedText)}</mark>`,
-  );
 }
 
 function renderTextList(id, items) {
@@ -385,14 +275,6 @@ function renderHistory(items) {
 function exportResult(format) {
   if (!state.result) {
     setLoading(false, "暂无可导出的结果");
-    return;
-  }
-  if (format === "json") {
-    downloadFile(
-      "thesisev-result.json",
-      "application/json;charset=utf-8",
-      JSON.stringify(state.result, null, 2),
-    );
     return;
   }
   downloadFile(
@@ -462,7 +344,6 @@ function escapeHtml(value) {
 
 function setLoading(loading, message) {
   submitButton.disabled = loading;
-  exportJsonButton.disabled = loading;
   exportMdButton.disabled = loading;
   statusNode.textContent = message;
 }

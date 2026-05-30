@@ -12,27 +12,17 @@
   <main class="shell">
     <section class="hero">
       <p class="eyebrow">THESISEV</p>
-      <h1>基于 FastAPI 的论文评价工作台</h1>
+      <h1>论文评价工作台</h1>
       <p class="lead">
-        上传论文或直接粘贴文本，选择大模型，快速得到结构分析、问题清单和总评语。
+        上传论文，选择大模型，快速得到结构分析、问题清单和总评语。
       </p>
     </section>
 
-      <section class="panel">
-        <form id="evaluate-form" class="form-grid">
-        <label class="field field-span-2">
-          <span>论文文本</span>
-          <textarea id="text" name="text" rows="10" placeholder="直接粘贴论文内容；如果上传文件，这里可以留空。"></textarea>
-        </label>
-
+    <section class="panel">
+      <form id="evaluate-form" class="form-grid">
         <label class="field">
           <span>上传文件</span>
           <input id="file" name="file" type="file" accept=".md,.txt,.docx" />
-        </label>
-
-        <label class="field">
-          <span>文件名</span>
-          <input id="filename" name="filename" type="text" value="submission.md" placeholder="submission.md" />
         </label>
 
         <label class="field">
@@ -64,30 +54,29 @@
           <button id="submit-button" type="submit">开始评价</button>
           <p id="status" class="status">等待输入</p>
         </div>
-        </form>
-      </section>
+      </form>
+    </section>
 
-      <section class="panel history-panel">
-        <div class="history-header">
-          <h2>最近评审</h2>
-          <button id="refresh-history" type="button" class="ghost-button">刷新</button>
-        </div>
-        <ul id="history-list" class="list"></ul>
-      </section>
+    <section class="panel history-panel">
+      <div class="history-header">
+        <h2>最近评审</h2>
+        <button id="refresh-history" type="button" class="ghost-button">刷新</button>
+      </div>
+      <ul id="history-list" class="list"></ul>
+    </section>
 
-      <section id="results" class="results hidden">
-        <article class="panel result-card">
-          <div class="result-header">
-            <h2>总评语</h2>
-            <div class="result-actions">
-              <span id="score-badge" class="score-badge">--</span>
-              <button id="export-json" type="button" class="ghost-button">导出 JSON</button>
-              <button id="export-md" type="button" class="ghost-button">导出 Markdown</button>
-            </div>
+    <section id="results" class="results hidden">
+      <article class="panel result-card">
+        <div class="result-header">
+          <h2>总评语</h2>
+          <div class="result-actions">
+            <span id="score-badge" class="score-badge">--</span>
+            <button id="export-md" type="button" class="ghost-button">评语导出 .md</button>
           </div>
-          <p id="comment" class="comment"></p>
-          <div id="model-meta" class="meta-line"></div>
-        </article>
+        </div>
+        <p id="comment" class="comment"></p>
+        <div id="model-meta" class="meta-line"></div>
+      </article>
 
       <article class="panel result-card">
         <h2>基础信息</h2>
@@ -99,28 +88,28 @@
         </div>
       </article>
 
-        <article class="panel result-card">
-          <h2>章节树</h2>
-          <div id="section-tree" class="tree"></div>
-        </article>
+      <article class="panel result-card">
+        <h2>章节树</h2>
+        <div id="section-tree" class="tree"></div>
+      </article>
 
-        <article class="panel result-card">
-          <h2>聚焦详情</h2>
-          <div id="focus-panel" class="focus-panel">
-            <p class="focus-empty">点击章节树或问题项后，这里会显示对应的段落和上下文。</p>
-          </div>
-        </article>
+      <article class="panel result-card">
+        <h2>聚焦详情</h2>
+        <div id="focus-panel" class="focus-panel">
+          <p class="focus-empty">点击章节树或问题项后，这里会显示对应的段落和上下文。</p>
+        </div>
+      </article>
 
-        <article class="panel result-card">
-          <h2>统计结果</h2>
-          <ul id="statistics-list" class="list"></ul>
-        </article>
+      <article class="panel result-card">
+        <h2>统计结果</h2>
+        <ul id="statistics-list" class="list"></ul>
+      </article>
 
-        <article class="panel result-card">
-          <h2>识别问题</h2>
-          <div id="issue-filters" class="filter-row"></div>
-          <ul id="issues-list" class="list"></ul>
-        </article>
+      <article class="panel result-card">
+        <h2>识别问题</h2>
+        <div id="issue-filters" class="filter-row"></div>
+        <ul id="issues-list" class="list"></ul>
+      </article>
 
       <article class="panel result-card">
         <h2>技术栈</h2>
