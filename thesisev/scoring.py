@@ -1108,10 +1108,7 @@ def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
         for rule in section.get("rules", []):
             if not isinstance(rule, dict):
                 continue
-            check = rule.get("check", rule.get("signal", {}))
-            if not isinstance(check, dict):
-                check = {}
-            expected = rule.get("expected", {})
+            check = normalize_rule_check(rule)
             rules.append(
                 {
                     "section": section_name,
@@ -1119,7 +1116,6 @@ def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
                     "id": str(rule.get("id") or "").strip(),
                     "label": str(rule.get("label") or "").strip(),
                     "points": parse_float_value(rule.get("points", 1)),
-                    "expected": expected,
                     "check": check,
                 }
             )
@@ -1150,7 +1146,7 @@ def summarize_format_spec(
         "items": [
             {
                 "label": f"{rule['section']} / {rule['label']}",
-                "value": format_expected_value(rule["expected"]) or rule["id"],
+                "value": format_expected_value(get_rule_expected(rule)) or rule["id"],
             }
             for rule in rules
         ],
@@ -1174,7 +1170,7 @@ def score_format_rules(
     deduction = 0.0
 
     for rule in rules:
-        signal = rule.get("check", rule.get("signal", {}))
+        signal = normalize_rule_check(rule)
         signal_type = str(signal.get("type", "")).strip()
         matched = False
         rule_evidence = ""
@@ -1221,7 +1217,7 @@ def score_format_rules(
             rule_evidence = f"{rule['label']}: 未定义检查类型，需人工核对"
             matched = False
 
-        expected_lines = format_expected_items(rule.get("expected"))
+        expected_lines = format_expected_items(get_rule_expected(rule))
         expected_text = "；".join(expected_lines)
         if expected_text:
             rule_evidence = f"{rule_evidence}；期望 {expected_text}"
@@ -1249,7 +1245,7 @@ def build_format_suggestion(rule: dict[str, Any]) -> str:
     """Build a short suggestion for a failed format rule."""
 
     label = str(rule.get("label", "")).strip() or str(rule.get("id", "")).strip()
-    expected = format_expected_value(rule.get("expected"))
+    expected = format_expected_value(get_rule_expected(rule))
     if expected:
         return f"对照规范检查{label}：{expected}"
     return f"对照规范检查{label}"
@@ -1307,7 +1303,7 @@ def evaluate_docx_expected_rule(
     """Evaluate a docx-style expected rule against the stored snapshot."""
 
     snapshot = document.format_snapshot or {}
-    expected_items = rule.get("expected", [])
+    expected_items = get_rule_expected(rule) or []
     if not isinstance(expected_items, list):
         return False, f"{rule['label']}: 期望项格式无效"
 
@@ -1334,7 +1330,7 @@ def build_rule_suggestion(rule: dict[str, Any]) -> str:
     """Build a short rule-based suggestion without hint text."""
 
     label = str(rule.get("label", "")).strip() or str(rule.get("id", "")).strip()
-    expected = format_expected_value(rule.get("expected"))
+    expected = format_expected_value(get_rule_expected(rule))
     if expected:
         return f"请核对{label}：{expected}"
     return f"请核对{label}"
@@ -1655,6 +1651,22 @@ def parse_optional_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
     return parse_float_value(value)
+
+
+def normalize_rule_check(rule: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a rule's check payload into a dict."""
+
+    check = rule.get("check", rule.get("signal", {}))
+    if not isinstance(check, dict):
+        return {}
+    return check
+
+
+def get_rule_expected(rule: dict[str, Any]) -> Any:
+    """Fetch expected values from the rule check payload."""
+
+    check = normalize_rule_check(rule)
+    return check.get("expected")
 
 
 def parse_float_value(value: Any) -> float:

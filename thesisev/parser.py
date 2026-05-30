@@ -334,8 +334,7 @@ def normalize_docx_style_name(value: str | None) -> str | None:
     if not value:
         return None
     normalized = value.replace("_", " ").strip()
-    normalized = re.sub(r"(?<=\D)(\d+)$", r" \1", normalized)
-    return normalized
+    return re.sub(r"(?<=\D)(\d+)$", r" \1", normalized)
 
 
 def normalize_docx_alignment(value: str | None) -> str | None:

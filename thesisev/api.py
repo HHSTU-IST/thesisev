@@ -367,7 +367,9 @@ def parse_format_requirements_file(path: Path, *, source_name: str) -> dict[str,
 
     payload = parse_json_file(path, name="format requirements")
     if isinstance(payload, dict) and "sections" in payload:
-        return normalize_structured_format_requirements(payload, source_name=source_name)
+        return normalize_structured_format_requirements(
+            payload, source_name=source_name
+        )
     items = normalize_format_requirements_payload(payload)
     return {"items": items, "item_count": len(items), "source_name": source_name}
 
@@ -498,10 +500,15 @@ def normalize_structured_format_requirements(
             if not isinstance(rule, dict):
                 continue
             rule_count += 1
+            check = rule.get("check", {})
+            if not isinstance(check, dict):
+                check = {}
             display_items.append(
                 {
                     "label": f"{section_label} / {str(rule.get('label') or rule.get('id') or '').strip()}",
-                    "value": stringify_format_requirement_value(rule.get("expected", "")),
+                    "value": stringify_format_requirement_value(
+                        check.get("expected", "")
+                    ),
                 }
             )
         section_items.append(
