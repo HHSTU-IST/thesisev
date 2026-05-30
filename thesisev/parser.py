@@ -26,25 +26,6 @@ SECTION_PATTERN = re.compile(
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
 MERMAID_FENCE_PATTERN = re.compile(r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$")
-MERMAID_HEADING_PATTERN = re.compile(
-    r"(?i)\b("
-    r"graph\s+(?:td|bt|lr|rl)"
-    r"|flowchart\s+(?:td|bt|lr|rl)"
-    r"|sequencediagram"
-    r"|classdiagram"
-    r"|statediagram"
-    r"|erdiagram"
-    r"|gantt"
-    r"|pie"
-    r"|journey"
-    r"|gitgraph"
-    r"|mindmap"
-    r"|timeline"
-    r")\b"
-)
-REFERENCE_HEADING_PATTERN = re.compile(
-    r"(?i)^(?:references?|bibliography|参考文献|文献|参考资料|参考书目)$"
-)
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DOCX_DOCUMENT_XML = "word/document.xml"
 MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
@@ -714,15 +695,15 @@ def build_section(
 
 
 def is_mermaid_heading(*, level: int, title: str) -> bool:
-    """Return whether a level-2/3 heading itself appears to be Mermaid syntax."""
+    """Return whether a level-2/3 heading is labeled as Mermaid code in Chinese."""
 
-    return level in {2, 3} and MERMAID_HEADING_PATTERN.search(title) is not None
+    return level in {2, 3} and "Mermaid代码" in title
 
 
 def is_reference_heading(title: str) -> bool:
-    """Return whether a heading is a references section."""
+    """Return whether a heading contains the Chinese references label."""
 
-    return REFERENCE_HEADING_PATTERN.fullmatch(title.strip()) is not None
+    return "参考文献" in title
 
 
 def mark_paragraph_skip_format_check(

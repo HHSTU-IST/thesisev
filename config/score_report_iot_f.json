@@ -6,18 +6,18 @@
     "rules": [
       {
         "id": "title_font",
-        "label": "一级标题字体",
+        "label": "二级标题字体",
         "points": 2,
         "check": {
           "type": "docx_expected",
           "expected": [
             {
               "path": "paragraph.style",
-              "value": "Heading 1"
+              "value": "Heading 2"
             },
             {
               "path": "run.font.name",
-              "value": "黑体"
+              "value": "SimHei"
             },
             {
               "path": "run.font.size",
@@ -32,18 +32,18 @@
       },
       {
         "id": "subtitle_font",
-        "label": "二级标题字体",
+        "label": "三级标题字体",
         "points": 2,
         "check": {
           "type": "docx_expected",
           "expected": [
             {
               "path": "paragraph.style",
-              "value": "Heading 2"
+              "value": "Heading 3"
             },
             {
               "path": "run.font.name",
-              "value": "黑体"
+              "value": "SimHei"
             },
             {
               "path": "run.font.size",
@@ -69,7 +69,7 @@
             },
             {
               "path": "run.font.name",
-              "value": "宋体"
+              "value": "SimSun"
             },
             {
               "path": "run.font.size",

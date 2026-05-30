@@ -150,7 +150,6 @@ function renderScoreDetail(scoreDetail) {
     `百分制: ${scoreDetail.score}`;
   scoreDetail.criteria.forEach((item) => {
     const li = document.createElement("li");
-    const evidence = (item.evidence || []).join("；") || "暂无证据";
     const deductions = (item.deductions || []).join("；") || "无明显扣分项";
     const standards = (item.standards || []).join("；") || "暂无标准说明";
     const title = document.createElement("strong");
@@ -159,10 +158,38 @@ function renderScoreDetail(scoreDetail) {
 
     li.appendChild(buildSubline(`标准: ${standards}`));
     li.appendChild(buildSubline(`方法: ${formatEvaluationMethod(item)}`));
-    li.appendChild(buildSubline(`证据: ${evidence}`));
+    appendScoreEvidence(li, item);
     li.appendChild(buildSubline(`扣分: ${deductions}`));
     listNode.appendChild(li);
   });
+}
+
+function appendScoreEvidence(parent, item) {
+  const evidenceItems = item.evidence || [];
+  if (!evidenceItems.length) {
+    parent.appendChild(buildSubline("证据: 暂无证据"));
+    return;
+  }
+  if (item.key !== "iot_format" && item.name !== "格式规范") {
+    parent.appendChild(buildSubline(`证据: ${evidenceItems.join("；")}`));
+    return;
+  }
+
+  const container = document.createElement("div");
+  container.className = "score-evidence";
+  const label = document.createElement("div");
+  label.className = "score-evidence-label";
+  label.textContent = "证据";
+  container.appendChild(label);
+
+  const list = document.createElement("ul");
+  evidenceItems.forEach((text) => {
+    const itemNode = document.createElement("li");
+    itemNode.textContent = text;
+    list.appendChild(itemNode);
+  });
+  container.appendChild(list);
+  parent.appendChild(container);
 }
 
 function renderIssueFilters(issues) {

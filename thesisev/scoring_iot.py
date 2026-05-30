@@ -240,7 +240,11 @@ def score_iot_format(
         key="iot_format",
         rubric_item=rubric_item,
         score=score,
-        evidence=[f"格式要求条目 {format_count}", f"检测问题 {len(issues)} 项"]
+        evidence=[
+            f"格式规范来源 {DEFAULT_IOT_FORMAT_RUBRIC}",
+            f"格式要求条目 {format_count}",
+            f"检测问题 {len(issues)} 项",
+        ]
         + summary["evidence"],
         deductions=summary["deductions"],
         suggestions=summary["suggestions"],

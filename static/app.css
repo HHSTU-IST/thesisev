@@ -381,6 +381,27 @@ button:disabled {
   font-size: 14px;
 }
 
+.score-evidence {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(37, 99, 235, 0.32);
+  border-radius: 12px;
+  background: rgba(219, 234, 254, 0.42);
+  color: #1e3a8a;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.score-evidence-label {
+  margin-bottom: 4px;
+  font-weight: 800;
+}
+
+.score-evidence ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .issue-excerpt {
   margin-top: 10px;
   padding: 10px 12px;
