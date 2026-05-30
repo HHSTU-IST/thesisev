@@ -16,9 +16,8 @@ const state = {
 const form = document.getElementById("evaluate-form");
 const providerInput = document.getElementById("provider");
 const modelInput = document.getElementById("model");
+const presetInput = document.getElementById("preset");
 const fileInput = document.getElementById("file");
-const rubricFileInput = document.getElementById("rubric-file");
-const formatFileInput = document.getElementById("format-file");
 const submitButton = document.getElementById("submit-button");
 const statusNode = document.getElementById("status");
 const resultsNode = document.getElementById("results");
@@ -63,6 +62,7 @@ form.addEventListener("submit", async (event) => {
 
 async function submitEvaluation() {
   const formData = new FormData();
+  formData.append("preset", presetInput.value);
   formData.append("provider", providerInput.value);
   formData.append("model", modelInput.value);
   formData.append("temperature", document.getElementById("temperature").value);
@@ -71,14 +71,6 @@ async function submitEvaluation() {
   const file = fileInput.files[0];
   if (file) {
     formData.append("file", file);
-  }
-  const rubricFile = rubricFileInput.files[0];
-  if (rubricFile) {
-    formData.append("rubric_file", rubricFile);
-  }
-  const formatFile = formatFileInput.files[0];
-  if (formatFile) {
-    formData.append("format_file", formatFile);
   }
   return postForm("/evaluate/upload", formData);
 }
@@ -361,32 +353,20 @@ function renderHistory(items) {
 
 function renderLastUpload(lastUpload) {
   lastUploadListNode.innerHTML = "";
-  const labels = {
-    thesis: "论文",
-    rubric: "评分标准",
-    format_requirements: "格式要求",
-  };
-  const order = ["thesis", "rubric", "format_requirements"];
-  let availableCount = 0;
-
-  order.forEach((key) => {
-    const entry = lastUpload?.[key] || null;
+  const entry = lastUpload?.thesis || null;
+  if (!entry || !entry.available) {
     const li = document.createElement("li");
-    if (!entry || !entry.available) {
-      li.textContent = `${labels[key]}: 暂无`;
-      lastUploadListNode.appendChild(li);
-      return;
-    }
-    availableCount += 1;
-    li.textContent =
-      `${labels[key]}: ${entry.filename} · ${entry.size} bytes · ${entry.updated_at}`;
+    li.textContent = "论文: 暂无";
     lastUploadListNode.appendChild(li);
-  });
+    reuseHintNode.textContent = "当前还没有可复用的上传记录，请先至少上传一次论文文件。";
+    return;
+  }
 
+  const li = document.createElement("li");
+  li.textContent = `论文: ${entry.filename} · ${entry.size} bytes · ${entry.updated_at}`;
+  lastUploadListNode.appendChild(li);
   reuseHintNode.textContent =
-    availableCount > 0
-      ? "未重新选择文件时，系统会自动复用上次上传文件。重新上传后会覆盖对应类型的上次记录。"
-      : "当前还没有可复用的上传记录，请先至少上传一次论文文件。";
+    "未重新选择论文文件时，系统会自动复用上次上传文件。重新上传后会覆盖上次论文记录。";
 }
 
 function renderRubric(rubric) {

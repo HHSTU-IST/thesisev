@@ -26,13 +26,11 @@
         </label>
 
         <label class="field">
-          <span>评分标准 JSON</span>
-          <input id="rubric-file" name="rubric_file" type="file" accept=".json" />
-        </label>
-
-        <label class="field">
-          <span>格式要求 JSON</span>
-          <input id="format-file" name="format_file" type="file" accept=".json" />
+          <span>评分预设</span>
+          <select id="preset" name="preset">
+            <option value="thesis_tech">thesis_tech</option>
+            <option value="report_iot">report_iot</option>
+          </select>
         </label>
 
         <label class="field">
@@ -67,7 +65,7 @@
 
         <div class="field field-span-2">
           <span>上次上传</span>
-          <p id="reuse-hint" class="status">未重新选择文件时，系统会自动复用上次上传的论文、评分标准和格式要求。</p>
+          <p id="reuse-hint" class="status">未重新选择论文文件时，系统会自动复用上次上传的论文。</p>
           <ul id="last-upload-list" class="list"></ul>
         </div>
       </form>

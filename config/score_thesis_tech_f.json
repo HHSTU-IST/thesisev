@@ -1,0 +1,21 @@
+{
+    "一级标题": {
+        "font-family": "黑体",
+        "font-size": "三号"
+    },
+    "二级标题": {
+        "font-family": "黑体",
+        "font-size": "四号"
+    },
+    "正文": {
+        "font-family": "宋体",
+        "font-size": "小四",
+        "line-height": "1.5"
+    },
+    "段间距": {
+        "before": "0",
+        "after": "0"
+    },
+    "表格": "居中",
+    "篇幅": "3500~4000"
+}

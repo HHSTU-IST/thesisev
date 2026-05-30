@@ -31,8 +31,8 @@ from thesisev.commentary import generate_comment
 from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
-from thesisev.paths import data_dir, project_root, static_dir, templates_dir
-from thesisev.scoring import calculate_score_report
+from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
+from thesisev.scoring import DEFAULT_THESIS_TECH_RUBRIC, calculate_score_report
 
 
 class EvaluateRequest(BaseModel):
@@ -50,6 +50,10 @@ class EvaluateRequest(BaseModel):
     )
     max_tokens: int = Field(
         default=400, ge=64, le=4000, description="Max output tokens for commentary."
+    )
+    preset: str = Field(
+        default="thesis_tech",
+        description="Built-in rubric preset name, such as thesis_tech or report_iot.",
     )
 
 
@@ -87,6 +91,17 @@ LAST_UPLOAD_PATH = HISTORY_DIR / "last_upload.json"
 MAX_HISTORY_ITEMS = 20
 templates = Jinja2Templates(directory=str(templates_dir()))
 app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
+
+PRESET_CONFIGS: dict[str, dict[str, str]] = {
+    "thesis_tech": {
+        "rubric": "score_thesis_tech.json",
+        "format": "score_thesis_tech_f.json",
+    },
+    "report_iot": {
+        "rubric": "score_report_iot.json",
+        "format": "score_report_iot_f.json",
+    },
+}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -127,13 +142,22 @@ def evaluate(request: EvaluateRequest) -> ApiResponse:
 
     source = validate_source_path(request.path)
     try:
+        rubric_filename, format_filename = resolve_preset_files(request.preset)
+        rubric_summary = load_builtin_rubric_summary(rubric_filename)
+        format_summary = load_builtin_format_requirements_summary(format_filename)
         result = evaluate_document(
             source,
             provider=request.provider,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+            rubric_filename=rubric_filename,
+            rubric=rubric_summary,
+            format_requirements=format_summary,
         )
+        result.metadata["rubric"] = rubric_summary
+        result.metadata["format_requirements"] = format_summary
+        result.metadata["preset"] = request.preset
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -159,8 +183,7 @@ def structure(request: StructureRequest) -> ApiResponse:
 @app.post("/evaluate/upload", response_model=ApiResponse)
 async def evaluate_upload(
     file: UploadFile | None = File(default=None),
-    rubric_file: UploadFile | None = File(default=None),
-    format_file: UploadFile | None = File(default=None),
+    preset: str = Form(default="thesis_tech"),
     provider: str = Form(default="deepseek"),
     model: str | None = Form(default=None),
     temperature: float = Form(default=0.2),
@@ -169,15 +192,17 @@ async def evaluate_upload(
     """Evaluate an uploaded thesis file."""
 
     try:
+        rubric_filename, format_filename = resolve_preset_files(preset)
         source = await resolve_thesis_source(file)
-        rubric_summary = await resolve_rubric_summary(rubric_file)
-        format_summary = await resolve_format_requirements_summary(format_file)
+        rubric_summary = load_builtin_rubric_summary(rubric_filename)
+        format_summary = load_builtin_format_requirements_summary(format_filename)
         result = evaluate_document(
             source,
             provider=provider,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            rubric_filename=rubric_filename,
             rubric=rubric_summary,
             format_requirements=format_summary,
         )
@@ -185,6 +210,7 @@ async def evaluate_upload(
             result.metadata["rubric"] = rubric_summary
         if format_summary is not None:
             result.metadata["format_requirements"] = format_summary
+        result.metadata["preset"] = preset
         result.metadata["last_upload"] = build_public_last_upload_manifest()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -229,6 +255,16 @@ def validate_rubric_suffix(suffix: str) -> None:
         raise HTTPException(status_code=400, detail=msg)
 
 
+def resolve_preset_files(preset: str) -> tuple[str, str | None]:
+    """Resolve bundled rubric filenames for a preset."""
+
+    config = PRESET_CONFIGS.get(preset)
+    if not config:
+        msg = f"unknown preset: {preset}"
+        raise HTTPException(status_code=400, detail=msg)
+    return config["rubric"], config["format"] or None
+
+
 async def save_upload_to_tempfile(file: UploadFile, *, suffix: str) -> Path:
     """Persist an uploaded file into a temporary path."""
 
@@ -253,53 +289,22 @@ async def resolve_thesis_source(file: UploadFile | None) -> Path:
     )
 
 
-async def resolve_rubric_summary(file: UploadFile | None) -> dict[str, Any] | None:
-    """Resolve rubric data from the current or last upload."""
+def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
+    """Load a bundled rubric summary."""
 
-    if file is not None:
-        stored_path = await store_upload_file(
-            file,
-            slot="rubric",
-            default_name="rubric.json",
-            validate_json_suffix=True,
-        )
-        return parse_rubric_file(
-            stored_path, source_name=file.filename or "rubric.json"
-        )
-
-    stored_path = load_last_upload_path(slot="rubric", missing_message="")
-    if not stored_path:
-        return None
-    entry = read_last_upload_manifest().get("rubric", {})
-    return parse_rubric_file(
-        stored_path, source_name=entry.get("filename", "rubric.json")
-    )
+    return parse_rubric_file(config_dir() / filename, source_name=filename)
 
 
-async def resolve_format_requirements_summary(
-    file: UploadFile | None,
+def load_builtin_format_requirements_summary(
+    filename: str | None,
 ) -> dict[str, Any] | None:
-    """Resolve format requirements data from the current or last upload."""
+    """Load a bundled format-requirements summary."""
 
-    if file is not None:
-        stored_path = await store_upload_file(
-            file,
-            slot="format_requirements",
-            default_name="format_requirements.json",
-            validate_json_suffix=True,
-        )
-        return parse_format_requirements_file(
-            stored_path,
-            source_name=file.filename or "format_requirements.json",
-        )
-
-    stored_path = load_last_upload_path(slot="format_requirements", missing_message="")
-    if not stored_path:
+    if not filename:
         return None
-    entry = read_last_upload_manifest().get("format_requirements", {})
     return parse_format_requirements_file(
-        stored_path,
-        source_name=entry.get("filename", "format_requirements.json"),
+        config_dir() / filename,
+        source_name=filename,
     )
 
 
@@ -348,23 +353,6 @@ def load_last_upload_path(slot: str, *, missing_message: str) -> Path | None:
     return stored_path
 
 
-async def parse_rubric_upload(file: UploadFile | None) -> dict[str, Any] | None:
-    """Parse an optional rubric JSON upload into a normalized summary."""
-
-    if file is None:
-        return None
-
-    suffix = Path(file.filename or "rubric.json").suffix.lower() or ".json"
-    validate_rubric_suffix(suffix)
-    payload = await parse_json_upload_payload(file, name="rubric")
-    items = normalize_rubric_payload(payload)
-    return {
-        "items": items,
-        "total_score": round(sum(item["score"] for item in items), 4),
-        "source_name": file.filename or "rubric.json",
-    }
-
-
 def parse_rubric_file(path: Path, *, source_name: str) -> dict[str, Any]:
     """Parse a stored rubric JSON file."""
 
@@ -374,25 +362,6 @@ def parse_rubric_file(path: Path, *, source_name: str) -> dict[str, Any]:
         "items": items,
         "total_score": round(sum(item["score"] for item in items), 4),
         "source_name": source_name,
-    }
-
-
-async def parse_format_requirements_upload(
-    file: UploadFile | None,
-) -> dict[str, Any] | None:
-    """Parse an optional format-requirements JSON upload."""
-
-    if file is None:
-        return None
-
-    suffix = Path(file.filename or "format_requirements.json").suffix.lower() or ".json"
-    validate_rubric_suffix(suffix)
-    payload = await parse_json_upload_payload(file, name="format requirements")
-    items = normalize_format_requirements_payload(payload)
-    return {
-        "items": items,
-        "item_count": len(items),
-        "source_name": file.filename or "format_requirements.json",
     }
 
 
@@ -592,6 +561,7 @@ def evaluate_document(
     max_tokens: int = 400,
     timeout: int = 60,
     model_config: ModelConfig | None = None,
+    rubric_filename: str = DEFAULT_THESIS_TECH_RUBRIC,
     rubric: dict[str, Any] | None = None,
     format_requirements: dict[str, Any] | None = None,
 ) -> EvaluationResult:
@@ -620,6 +590,7 @@ def evaluate_document(
         technology_details=technology_details,
         format_requirements=format_requirements,
         rubric=rubric,
+        rubric_filename=rubric_filename,
         model_config=runtime_model_config,
     )
     score = score_report.score
@@ -650,6 +621,8 @@ def evaluate_document(
             "score_source": score_report.score_source,
             "score_detail": score_report.to_dict(),
             "comment_source": comment_source,
+            "rubric": rubric,
+            "format_requirements": format_requirements,
             "evaluation_roles": {
                 "format_detection": "local_program",
                 "format_evaluation": "local_program",
@@ -744,7 +717,7 @@ def build_public_last_upload_manifest() -> dict[str, dict[str, Any] | None]:
 
     manifest = read_last_upload_manifest()
     public_manifest: dict[str, dict[str, Any] | None] = {}
-    for slot in ("thesis", "rubric", "format_requirements"):
+    for slot in ("thesis",):
         entry = manifest.get(slot)
         if not entry:
             public_manifest[slot] = None
@@ -784,5 +757,4 @@ def resolve_upload_manifest_path(slot: str, entry: dict[str, Any]) -> Path:
         return stored_path
 
     suffix = entry.get("suffix", stored_path.suffix)
-    candidate = UPLOAD_DIR / f"last_{slot}{suffix}"
-    return candidate
+    return UPLOAD_DIR / f"last_{slot}{suffix}"

@@ -1050,34 +1050,219 @@ def score_iot_format(
 ) -> ScoreCriterion:
     """Score format compliance."""
 
-    format_rubric_items = normalize_rubric_payload(
-        load_json_resource(DEFAULT_IOT_FORMAT_RUBRIC)
+    format_spec = load_json_resource(DEFAULT_IOT_FORMAT_RUBRIC)
+    if not isinstance(format_spec, dict):
+        raise ValueError("format rubric must be an object")
+    rules = extract_format_rules(format_spec)
+    if not rules:
+        raise ValueError("format rubric rules are empty")
+    summary = score_format_rules(
+        document=document,
+        issues=issues,
+        rules=rules,
+        format_requirements=format_requirements,
     )
-    if not format_rubric_items:
-        raise ValueError("format rubric is empty")
-    format_rubric_item = next(
-        (item for item in format_rubric_items if item.name == rubric_item.name),
-        None,
-    )
-    if format_rubric_item is None:
-        raise ValueError(f"format rubric missing criterion: {rubric_item.name}")
     format_count = (
         len(format_requirements.get("items", [])) if format_requirements else 0
     )
-    penalty = sum(0.4 if issue.category == "标点误用" else 0.2 for issue in issues)
     score = max(
         0.0,
-        format_rubric_item.max_score
-        - min(format_rubric_item.max_score * 0.8, penalty),
+        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["penalty"]),
     )
     return build_criterion(
         key="iot_format",
-        rubric_item=format_rubric_item,
+        rubric_item=rubric_item,
         score=score,
-        evidence=[f"格式要求条目 {format_count}", f"检测问题 {len(issues)} 项"],
-        deductions=[] if not issues else ["格式规范存在偏差"],
-        suggestions=[] if not issues else ["对照上传格式要求逐项复核"],
+        evidence=[f"格式要求条目 {format_count}", f"检测问题 {len(issues)} 项"]
+        + summary["evidence"],
+        deductions=summary["deductions"],
+        suggestions=summary["suggestions"],
     )
+
+
+def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract normalized format rules from the bundled format spec."""
+
+    sections = format_spec.get("sections", [])
+    if not isinstance(sections, list):
+        raise ValueError("format rubric sections must be a list")
+
+    rules: list[dict[str, Any]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_name = str(section.get("name") or section.get("id") or "").strip()
+        section_weight = parse_float_value(section.get("weight", 0))
+        for rule in section.get("rules", []):
+            if not isinstance(rule, dict):
+                continue
+            signal = rule.get("signal", {})
+            if not isinstance(signal, dict):
+                signal = {}
+            rules.append(
+                {
+                    "section": section_name,
+                    "section_weight": section_weight,
+                    "id": str(rule.get("id") or "").strip(),
+                    "label": str(rule.get("label") or "").strip(),
+                    "expected": rule.get("expected", ""),
+                    "severity": str(rule.get("severity", "low")).strip() or "low",
+                    "penalty": parse_float_value(rule.get("penalty", 1)),
+                    "hint": str(rule.get("hint", "")).strip(),
+                    "signal": signal,
+                }
+            )
+    return rules
+
+
+def summarize_format_spec(
+    format_spec: dict[str, Any], *, source_name: str
+) -> dict[str, Any]:
+    """Convert the bundled format spec into UI-friendly summary data."""
+
+    rules = extract_format_rules(format_spec)
+    sections = format_spec.get("sections", [])
+    section_summary = [
+        {
+            "label": str(section.get("name") or section.get("id") or "").strip(),
+            "weight": parse_float_value(section.get("weight", 0)),
+            "rule_count": len(section.get("rules", []))
+            if isinstance(section, dict)
+            else 0,
+        }
+        for section in sections
+        if isinstance(section, dict)
+    ]
+    return {
+        "source_name": source_name,
+        "item_count": len(rules),
+        "items": [
+            {
+                "label": f"{rule['section']} / {rule['label']}",
+                "value": str(rule["expected"]) if rule["expected"] else rule["id"],
+            }
+            for rule in rules
+        ],
+        "sections": section_summary,
+    }
+
+
+def score_format_rules(
+    *,
+    document: ThesisDocument,
+    issues: list[Issue],
+    rules: list[dict[str, Any]],
+    format_requirements: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Score bundled format rules against document signals."""
+
+    issue_categories = Counter(issue.category for issue in issues)
+    issue_text = "\n".join(f"{issue.category}:{issue.message}" for issue in issues)
+    evidence: list[str] = []
+    deductions: list[str] = []
+    suggestions: list[str] = []
+    penalty = 0.0
+
+    for rule in rules:
+        signal = rule.get("signal", {})
+        signal_type = str(signal.get("type", "")).strip()
+        matched = False
+        rule_evidence = ""
+        suggestion = rule.get("hint") or build_format_suggestion(rule)
+
+        if signal_type == "word_count_range":
+            min_words = parse_optional_float(signal.get("min"))
+            max_words = parse_optional_float(signal.get("max"))
+            word_count = document.total_word_count
+            rule_evidence = f"{rule['label']}: {word_count} 字"
+            matched = (
+                (min_words is not None and word_count < min_words)
+                or (max_words is not None and word_count > max_words)
+            )
+        elif signal_type == "section_count_min":
+            min_sections = parse_optional_float(signal.get("min")) or 0
+            section_count = len(document.sections)
+            rule_evidence = f"{rule['label']}: {section_count} 个章节"
+            matched = section_count < min_sections
+        elif signal_type == "text_contains_any":
+            terms = normalize_string_list(signal.get("terms", []))
+            matched_terms = [term for term in terms if term in document.cleaned_text]
+            rule_evidence = (
+                f"{rule['label']}: {'，'.join(matched_terms) if matched_terms else '未命中'}"
+            )
+            matched = not matched_terms
+        elif signal_type == "issue_category":
+            categories = normalize_string_list(signal.get("categories", []))
+            hit_count = sum(issue_categories.get(category, 0) for category in categories)
+            rule_evidence = f"{rule['label']}: {hit_count} 项问题"
+            matched = hit_count > 0
+        elif signal_type == "text_term_count_min":
+            terms = normalize_string_list(signal.get("terms", []))
+            min_hits = parse_optional_float(signal.get("min")) or 0
+            hit_count = count_terms(document.cleaned_text, tuple(terms))
+            rule_evidence = f"{rule['label']}: {hit_count} 次关键词命中"
+            matched = hit_count < min_hits
+        else:
+            rule_evidence = f"{rule['label']}: 未定义检查类型"
+            matched = True
+
+        evidence.append(rule_evidence)
+        if matched:
+            severity = str(rule.get("severity", "low")).lower()
+            severity_multiplier = {"high": 1.25, "medium": 1.0, "low": 0.75}.get(
+                severity, 0.75
+            )
+            penalty += parse_float_value(rule.get("penalty", 1)) * severity_multiplier
+            deductions.append(f"{rule['label']} 不符合要求")
+            if suggestion:
+                suggestions.append(str(suggestion))
+
+    if format_requirements:
+        evidence.append("已读取内置格式要求，可用于人工复核")
+
+    return {
+        "penalty": penalty,
+        "evidence": evidence,
+        "deductions": deduplicate_preserving_order(deductions),
+        "suggestions": deduplicate_preserving_order(suggestions),
+    }
+
+
+def build_format_suggestion(rule: dict[str, Any]) -> str:
+    """Build a short suggestion for a failed format rule."""
+
+    label = str(rule.get("label", "")).strip() or str(rule.get("id", "")).strip()
+    expected = str(rule.get("expected", "")).strip()
+    if expected:
+        return f"对照规范检查{label}：{expected}"
+    return f"对照规范检查{label}"
+
+
+def normalize_string_list(value: Any) -> list[str]:
+    """Normalize a value to a compact non-empty string list."""
+
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def parse_optional_float(value: Any) -> float | None:
+    """Parse an optional numeric value."""
+
+    if value in (None, ""):
+        return None
+    return parse_float_value(value)
+
+
+def parse_float_value(value: Any) -> float:
+    """Parse a numeric value with validation."""
+
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        msg = "numeric format rubric value required"
+        raise ValueError(msg)
+    return float(value)
 
 
 def resolve_rubric_items(

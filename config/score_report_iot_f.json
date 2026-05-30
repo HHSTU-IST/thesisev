@@ -1,21 +1,134 @@
 {
-    "一级标题": {
-        "font-family": "黑体",
-        "font-size": "三号"
+    "metadata": {
+        "name": "score_report_iot_f",
+        "title": "物联网调研报告格式规范",
+        "scope": "local_program",
+        "version": 1
     },
-    "二级标题": {
-        "font-family": "黑体",
-        "font-size": "四号"
-    },
-    "正文": {
-        "font-family": "宋体",
-        "font-size": "小四",
-        "line-height": "1.5"
-    },
-    "段间距": {
-        "before": "0",
-        "after": "0"
-    },
-    "表格": "居中",
-    "篇幅": "3500~4000"
+    "sections": [
+        {
+            "id": "page_layout",
+            "name": "版式与页面",
+            "weight": 0.35,
+            "rules": [
+                {
+                    "id": "title_font",
+                    "label": "一级标题",
+                    "expected": {
+                        "font-family": "黑体",
+                        "font-size": "三号"
+                    },
+                    "severity": "high",
+                    "penalty": 3
+                },
+                {
+                    "id": "subtitle_font",
+                    "label": "二级标题",
+                    "expected": {
+                        "font-family": "黑体",
+                        "font-size": "四号"
+                    },
+                    "severity": "medium",
+                    "penalty": 2
+                },
+                {
+                    "id": "body_font",
+                    "label": "正文",
+                    "expected": {
+                        "font-family": "宋体",
+                        "font-size": "小四",
+                        "line-height": "1.5"
+                    },
+                    "severity": "high",
+                    "penalty": 3
+                },
+                {
+                    "id": "spacing",
+                    "label": "段间距",
+                    "expected": {
+                        "before": "0",
+                        "after": "0"
+                    },
+                    "severity": "medium",
+                    "penalty": 1.5
+                },
+                {
+                    "id": "table_alignment",
+                    "label": "表格",
+                    "expected": "居中",
+                    "severity": "low",
+                    "penalty": 1
+                }
+            ]
+        },
+        {
+            "id": "document_length",
+            "name": "篇幅与结构",
+            "weight": 0.25,
+            "rules": [
+                {
+                    "id": "length",
+                    "label": "篇幅",
+                    "expected": "3500~4000",
+                    "severity": "high",
+                    "penalty": 4,
+                    "hint": "统计正文与封面合计字数，过短或过长都应扣分"
+                },
+                {
+                    "id": "headings",
+                    "label": "标题层级",
+                    "expected": "层级清晰",
+                    "severity": "medium",
+                    "penalty": 2,
+                    "hint": "检查是否存在混乱编号、跳级或重复标题"
+                }
+            ]
+        },
+        {
+            "id": "writing_style",
+            "name": "表达与排版",
+            "weight": 0.25,
+            "rules": [
+                {
+                    "id": "punctuation",
+                    "label": "标点",
+                    "expected": "中文语境下标点统一",
+                    "severity": "medium",
+                    "penalty": 1,
+                    "match": ["标点误用"]
+                },
+                {
+                    "id": "colloquial",
+                    "label": "表达",
+                    "expected": "书面化、技术化",
+                    "severity": "medium",
+                    "penalty": 1.5,
+                    "match": ["口语化表达"]
+                },
+                {
+                    "id": "citations",
+                    "label": "引用",
+                    "expected": "引用标记规范",
+                    "severity": "low",
+                    "penalty": 1,
+                    "match": ["参考文献", "文献综述", "相关研究"]
+                }
+            ]
+        },
+        {
+            "id": "tables_figures",
+            "name": "图表与引用",
+            "weight": 0.15,
+            "rules": [
+                {
+                    "id": "tables",
+                    "label": "图表",
+                    "expected": "图表与正文匹配",
+                    "severity": "low",
+                    "penalty": 1,
+                    "hint": "检查图表是否超边界、无编号或未在正文中提及"
+                }
+            ]
+        }
+    ]
 }
