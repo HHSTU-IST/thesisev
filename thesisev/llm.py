@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from langchain.chat_models import init_chat_model
+
 from thesisev.paths import data_dir
 
 DEFAULT_PROVIDER = "deepseek"

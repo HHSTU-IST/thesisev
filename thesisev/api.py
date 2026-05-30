@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import tempfile
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Literal
@@ -32,7 +32,7 @@ from thesisev.commentary import generate_comment
 from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
-from thesisev.paths import data_dir, project_root, static_dir, templates_dir
+from thesisev.paths import data_dir, static_dir, templates_dir
 
 
 class EvaluateRequest(BaseModel):
@@ -76,7 +76,6 @@ app = FastAPI(
     version="0.1.0",
     description="API for structured thesis analysis and multi-model commentary.",
 )
-PROJECT_DIR = project_root()
 HISTORY_DIR = data_dir()
 HISTORY_PATH = HISTORY_DIR / "history.json"
 UPLOAD_DIR = HISTORY_DIR / "uploads"
@@ -251,13 +250,17 @@ async def resolve_rubric_summary(file: UploadFile | None) -> dict[str, Any] | No
             default_name="rubric.json",
             validate_json_suffix=True,
         )
-        return parse_rubric_file(stored_path, source_name=file.filename or "rubric.json")
+        return parse_rubric_file(
+            stored_path, source_name=file.filename or "rubric.json"
+        )
 
     stored_path = load_last_upload_path(slot="rubric", missing_message="")
     if not stored_path:
         return None
     entry = read_last_upload_manifest().get("rubric", {})
-    return parse_rubric_file(stored_path, source_name=entry.get("filename", "rubric.json"))
+    return parse_rubric_file(
+        stored_path, source_name=entry.get("filename", "rubric.json")
+    )
 
 
 async def resolve_format_requirements_summary(
@@ -324,7 +327,7 @@ def load_last_upload_path(slot: str, *, missing_message: str) -> Path | None:
             raise ValueError(missing_message)
         return None
 
-    stored_path = Path(entry["stored_path"])
+    stored_path = resolve_upload_manifest_path(slot, entry)
     if not stored_path.exists():
         if missing_message:
             raise ValueError(missing_message)
@@ -640,7 +643,7 @@ def build_history_entry(result) -> dict[str, Any]:
 
     return {
         "id": uuid.uuid4().hex,
-        "created_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+        "created_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         "title": result.document.title,
         "source_type": result.document.source_type,
         "score": result.score,
@@ -657,7 +660,14 @@ def read_last_upload_manifest() -> dict[str, dict[str, Any]]:
 
     if not LAST_UPLOAD_PATH.exists():
         return {}
-    return json.loads(LAST_UPLOAD_PATH.read_text(encoding="utf-8"))
+    manifest = json.loads(LAST_UPLOAD_PATH.read_text(encoding="utf-8"))
+    normalized_manifest = normalize_last_upload_manifest(manifest)
+    if normalized_manifest != manifest:
+        LAST_UPLOAD_PATH.write_text(
+            json.dumps(normalized_manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    return normalized_manifest
 
 
 def update_last_upload_manifest(*, slot: str, filename: str, stored_path: Path) -> None:
@@ -668,7 +678,7 @@ def update_last_upload_manifest(*, slot: str, filename: str, stored_path: Path) 
     manifest[slot] = {
         "filename": filename,
         "stored_path": str(stored_path),
-        "updated_at": datetime.now(tz=timezone.utc).isoformat(timespec="seconds"),
+        "updated_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
         "size": stored_path.stat().st_size,
         "suffix": stored_path.suffix.lower(),
     }
@@ -688,7 +698,7 @@ def build_public_last_upload_manifest() -> dict[str, dict[str, Any] | None]:
         if not entry:
             public_manifest[slot] = None
             continue
-        stored_path = Path(entry["stored_path"])
+        stored_path = resolve_upload_manifest_path(slot, entry)
         if not stored_path.exists():
             public_manifest[slot] = None
             continue
@@ -700,3 +710,28 @@ def build_public_last_upload_manifest() -> dict[str, dict[str, Any] | None]:
             "available": True,
         }
     return public_manifest
+
+
+def normalize_last_upload_manifest(
+    manifest: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Normalize persisted upload paths after layout changes."""
+
+    normalized: dict[str, dict[str, Any]] = {}
+    for slot, entry in manifest.items():
+        normalized_entry = dict(entry)
+        normalized_entry["stored_path"] = str(resolve_upload_manifest_path(slot, entry))
+        normalized[slot] = normalized_entry
+    return normalized
+
+
+def resolve_upload_manifest_path(slot: str, entry: dict[str, Any]) -> Path:
+    """Resolve the current stored path for a manifest entry."""
+
+    stored_path = Path(entry["stored_path"])
+    if stored_path.exists():
+        return stored_path
+
+    suffix = entry.get("suffix", stored_path.suffix)
+    candidate = UPLOAD_DIR / f"last_{slot}{suffix}"
+    return candidate
