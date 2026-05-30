@@ -127,9 +127,14 @@ function renderResults() {
   ).toFixed(1)}%`;
 
   const modelMeta = data.metadata?.model || {};
-  document.getElementById("model-meta").textContent =
-    `模型: ${modelMeta.provider || "-"} / ${modelMeta.model || "-"} | ` +
-    `Key可用: ${modelMeta.available ? "是" : "否"}`;
+  const scoreSource = data.metadata?.score_source || "rule_engine";
+  const commentSource = data.metadata?.comment_source || "fallback";
+  document.getElementById("model-meta").innerHTML = [
+    `<span class="meta-chip">模型 ${escapeHtml(modelMeta.provider || "-")} / ${escapeHtml(modelMeta.model || "-")}</span>`,
+    `<span class="meta-chip ${modelMeta.available ? "is-ready" : "is-muted"}">Key ${modelMeta.available ? "可用" : "不可用"}</span>`,
+    `<span class="meta-chip is-score">${formatScoreSource(scoreSource)}</span>`,
+    `<span class="meta-chip ${commentSource === "llm" ? "is-llm" : "is-fallback"}">${formatCommentSource(commentSource)}</span>`,
+  ].join("");
 
   renderStatistics(data.statistics);
   renderIssueFilters(data.issues);
@@ -415,6 +420,8 @@ function buildMarkdown(data) {
     `- 分数: ${data.score}`,
     `- 类型: ${data.document.source_type}`,
     `- 主题相关占比: ${(data.topic_relevance_ratio * 100).toFixed(1)}%`,
+    `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "rule_engine")}`,
+    `- 评语来源: ${formatCommentSource(data.metadata?.comment_source || "fallback")}`,
     "",
     "## 总评语",
     "",
@@ -473,6 +480,23 @@ function downloadFile(filename, mimeType, content) {
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(url);
+}
+
+function formatScoreSource(source) {
+  if (source === "rule_engine") {
+    return "分数: 规则引擎";
+  }
+  return source || "-";
+}
+
+function formatCommentSource(source) {
+  if (source === "llm") {
+    return "评语: LLM";
+  }
+  if (source === "fallback") {
+    return "评语: 规则回退";
+  }
+  return source || "-";
 }
 
 function escapeHtml(value) {

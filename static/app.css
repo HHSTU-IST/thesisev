@@ -213,6 +213,52 @@ button:disabled {
   margin-top: 14px;
   color: var(--muted);
   font-size: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.meta-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 41, 55, 0.1);
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.meta-chip.is-ready {
+  border-color: rgba(22, 101, 52, 0.18);
+  background: rgba(22, 101, 52, 0.1);
+  color: #166534;
+}
+
+.meta-chip.is-muted {
+  border-color: rgba(107, 114, 128, 0.16);
+  background: rgba(107, 114, 128, 0.1);
+  color: var(--muted);
+}
+
+.meta-chip.is-score {
+  border-color: rgba(180, 83, 9, 0.18);
+  background: rgba(180, 83, 9, 0.12);
+  color: var(--accent-strong);
+}
+
+.meta-chip.is-llm {
+  border-color: rgba(8, 145, 178, 0.2);
+  background: rgba(8, 145, 178, 0.12);
+  color: #0f766e;
+}
+
+.meta-chip.is-fallback {
+  border-color: rgba(124, 45, 18, 0.18);
+  background: rgba(124, 45, 18, 0.12);
+  color: var(--accent-strong);
 }
 
 .kv-grid {
