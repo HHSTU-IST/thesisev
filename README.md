@@ -4,19 +4,18 @@
 
 ## 设计理念
 
-- 内容评价与评分：依靠调用大模型API
-- 格式检测与评分：依靠本地程序
-- 评分标准：存储于 `json` 文件，可自主上传
-- 格式要求：存储于 `json` 文件，可自主上传
+- 格式检测与格式评价由本地程序完成
+- 评分标准由大模型打分
+- 内容评价由大模型生成
+- 评分标准与格式要求均来自程序内置 `json` 文件
 
 ## 主要功能
 
 - 论文结构解析：支持上传 `md` 或 `docx` 论文，解析标题、章节、段落与句子结构。
-- 本地格式检测与评分：自动统计章节占比、主题相关度、关键词和技术栈，并由本地程序识别标点误用、口语化表达等格式问题，分数由本地规则独立计算。
-- 大模型内容评价：基于 LangChain 接入多种大模型，默认使用 `deepseek/deepseek-chat` 生成论文内容评价，LLM 只评价选题、论证、方案、技术路线和创新价值，不负责格式检测或打分。
-- 评分标准读取：支持上传评分标准 `json` 文件，解析后在 UI 中展示。
-- 格式要求读取：支持上传格式要求 `json` 文件，解析后在 UI 中展示。
-- 历史与复用：自动保存最近评审记录，并记住上次上传的论文、评分标准、格式要求，刷新页面后可直接复用。
+- 本地格式检测与评分：自动统计章节占比、主题相关度、关键词和技术栈，并由本地程序识别格式问题；格式评价仅做本地复核，不依赖上传规则文件。
+- 大模型内容评价：基于 LangChain 接入多种大模型，默认使用 `deepseek/deepseek-chat` 生成论文内容评价，LLM 负责内容评价与评分。
+- 预设规则读取：评分标准与格式要求均从程序内置 `json` 文件读取，UI 提供评分预设下拉菜单，选择后自动加载对应的评分标准与格式要求。
+- 历史与复用：自动保存最近评审记录，并记住上次上传的论文。
 - 多入口使用：同时提供 CLI、FastAPI API 和内置 Web UI，便于命令行调用、接口集成和页面操作。
 
 ## 快速开始
@@ -56,30 +55,9 @@ uv run thesisev examples/sample_thesis.md --output structure
 open http://127.0.0.1:8000
 ```
 
-UI 可选上传评分标准 `json` 文件，支持扁平分值或带标准说明的结构：
+评分预设由程序内置，当前 UI 可选择的预设例如 `thesis_tech` 和 `report_iot`。对应的评分标准与格式要求会自动加载，无需上传。`report_iot` 会同时读取 `score_report_iot.json` 和 `score_report_iot_f.json`。
 
-```json
-{"摘要": 10, "结构": 20, "结论": 10}
-```
-
-```json
-{
-  "选题及工作量": {
-    "standard": ["课题使学生受到本专业全面综合训练", "难易程度、工作量适宜"],
-    "score": 20
-  }
-}
-```
-
-UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
-
-```json
-{"页边距": "上2.5cm，下2.5cm", "标题层级": "最多三级", "参考文献": "GB/T 7714"}
-```
-
-```json
-["正文使用小四宋体", "摘要不超过 300 字", {"行距": "1.5 倍"}]
-```
+内置格式规则采用结构化 `json`，每条规则在 `check` 中声明 `type`、`expected` 和必要参数，便于本地解析与人工复核。
 
 ## 评分逻辑
 
@@ -101,7 +79,9 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 
 ### 调研报告
 
-- 物联网：`config/score_report_iot.json`
+- 物联网：
+  - 内容：`config/score_report_iot.json`
+  - 格式：`config/score_report_iot_f.json`
 
 ## 毕业设计评分实现方案
 
@@ -136,7 +116,7 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 - [x] `score_research_argument(document, keywords)`：检测参考文献、引用数量、文献与主题关键词的相关性，以及“因此/表明/综上”等论证表达。
 - [x] `score_translation(document)`：检测是否同时存在中英文摘要，判断英文摘要长度、句子完整性和英文摘要篇幅。
 - [x] `score_experiment_analysis(document, technology_details)`：判断是否包含方案、数据处理、分析论证、可行性或效益分析等要素。
-- [x] `score_writing_quality(document, issues, format_requirements)`：基于问题数量和严重程度扣分，并读取上传的格式要求作为复核依据。
+- [x] `score_writing_quality(document, issues, format_requirements)`：基于问题数量和严重程度扣分，并读取内置格式要求作为复核依据。
 - [x] `score_innovation(document, technology_details)`：检测“创新/改进/优化/提出/应用价值”等表述，并结合结论章节和技术组合给启发式评分。
 
 总分计算建议：
@@ -223,7 +203,7 @@ curl http://127.0.0.1:8000/last-upload
 - 返回结果中可通过 `metadata.score_source`、`metadata.comment_source` 和 `metadata.evaluation_roles` 判断职责来源
 - 最近评审会写入本地 `data/history.json`
 - 现在只支持上传 `md` 或 `docx` 文件评审
-- 上传过一次后，页面刷新或再次评审时会自动复用上次上传的论文、评分标准、格式要求
+- 上传过一次后，页面刷新或再次评审时会自动复用上次上传的论文
 
 ## 目录说明
 

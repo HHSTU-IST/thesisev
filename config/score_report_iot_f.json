@@ -1,10 +1,4 @@
 {
-  "metadata": {
-    "preset": "report_iot",
-    "name": "物联网报告格式规范",
-    "target_model": "python-docx",
-    "version": "1.0"
-  },
   "sections": [
     {
       "id": "document_layout",

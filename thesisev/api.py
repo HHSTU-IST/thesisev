@@ -524,7 +524,6 @@ def normalize_structured_format_requirements(
         "item_count": len(display_items),
         "items": display_items,
         "sections": section_items,
-        "metadata": payload.get("metadata", {}),
     }
 
 
