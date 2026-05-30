@@ -386,12 +386,13 @@ async def store_upload_file(
     try:
         with temp_path.open("wb") as output:
             while chunk := await file.read(UPLOAD_READ_CHUNK_BYTES):
-                written += len(chunk)
-                if written > MAX_EVALUATE_UPLOAD_BYTES:
+                next_written = written + len(chunk)
+                if next_written > MAX_EVALUATE_UPLOAD_BYTES:
                     raise HTTPException(
                         status_code=413,
                         detail=build_upload_too_large_message(),
                     )
+                written = next_written
                 output.write(chunk)
         if written == 0:
             msg = f"{slot.replace('_', ' ')} file is empty"

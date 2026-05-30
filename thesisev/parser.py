@@ -33,6 +33,14 @@ MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
 MAX_DOCX_MEMBER_BYTES = 30 * 1024 * 1024
 MAX_DOCX_DOCUMENT_XML_BYTES = 10 * 1024 * 1024
 MAX_DOCX_COMPRESSION_RATIO = 100
+MAX_DOCX_XML_ELEMENTS = 200000
+MAX_DOCX_TEXT_PARAGRAPHS = 5000
+MAX_DOCX_TEXT_NODES = 100000
+MAX_DOCX_SNAPSHOT_PARAGRAPHS = 5000
+MAX_DOCX_SNAPSHOT_TABLES = 500
+MAX_DOCX_SNAPSHOT_SECTIONS = 200
+MAX_DOCX_RUNS_PER_PARAGRAPH = 500
+MAX_DOCX_TEXT_NODES_PER_RUN = 200
 ZIP_READ_CHUNK_BYTES = 1024 * 1024
 
 
@@ -111,10 +119,24 @@ def read_docx_text_from_xml(xml_bytes: bytes) -> str:
     """Extract plain text from an already validated document.xml payload."""
 
     root = ElementTree.fromstring(xml_bytes)
+    validate_docx_xml_element_count(root)
     paragraphs: list[str] = []
-    for paragraph in root.findall(".//w:p", WORD_NAMESPACE):
-        runs = paragraph.findall(".//w:t", WORD_NAMESPACE)
-        text = "".join(run.text or "" for run in runs).strip()
+    text_node_count = 0
+    for paragraph in iter_limited(
+        root, "p", max_items=MAX_DOCX_TEXT_PARAGRAPHS, label="paragraphs"
+    ):
+        run_texts: list[str] = []
+        for text_node in iter_limited(
+            paragraph,
+            "t",
+            max_items=MAX_DOCX_TEXT_NODES_PER_RUN * MAX_DOCX_RUNS_PER_PARAGRAPH,
+            label="text nodes per paragraph",
+        ):
+            text_node_count += 1
+            if text_node_count > MAX_DOCX_TEXT_NODES:
+                raise_docx_traversal_limit("text nodes", MAX_DOCX_TEXT_NODES)
+            run_texts.append(text_node.text or "")
+        text = "".join(run_texts).strip()
         if text:
             paragraphs.append(text)
     return "\n\n".join(paragraphs)
@@ -130,24 +152,34 @@ def read_docx_format_snapshot_from_xml(xml_bytes: bytes) -> dict[str, Any]:
     """Extract a compact formatting snapshot from validated document.xml bytes."""
 
     document_xml = ElementTree.fromstring(xml_bytes)
+    validate_docx_xml_element_count(document_xml)
 
     paragraphs: list[dict[str, Any]] = []
     tables = [
         extract_docx_table_snapshot(table)
-        for table in document_xml.findall(".//w:tbl", WORD_NAMESPACE)
+        for table in iter_limited(
+            document_xml, "tbl", max_items=MAX_DOCX_SNAPSHOT_TABLES, label="tables"
+        )
     ]
     sections = [
         extract_docx_section_snapshot(sect_pr)
-        for sect_pr in document_xml.findall(".//w:sectPr", WORD_NAMESPACE)
+        for sect_pr in iter_limited(
+            document_xml,
+            "sectPr",
+            max_items=MAX_DOCX_SNAPSHOT_SECTIONS,
+            label="sections",
+        )
     ]
 
-    paragraphs.extend(
-        snapshot
-        for paragraph in document_xml.findall(".//w:p", WORD_NAMESPACE)
-        if (snapshot := extract_docx_paragraph_snapshot(paragraph))["text"]
-        or snapshot["style"]
-        or snapshot["runs"]
-    )
+    for paragraph in iter_limited(
+        document_xml,
+        "p",
+        max_items=MAX_DOCX_SNAPSHOT_PARAGRAPHS,
+        label="paragraph snapshots",
+    ):
+        snapshot = extract_docx_paragraph_snapshot(paragraph)
+        if snapshot["text"] or snapshot["style"] or snapshot["runs"]:
+            paragraphs.append(snapshot)
 
     if not sections:
         sections.append({})
@@ -256,12 +288,44 @@ def read_zip_member_limited(archive: ZipFile, member: ZipInfo, *, max_size: int)
     return b"".join(chunks)
 
 
+def iter_limited(
+    root: ElementTree.Element, local_name: str, *, max_items: int, label: str
+):
+    """Yield matching descendants while enforcing a traversal limit."""
+
+    count = 0
+    suffix = f"}}{local_name}"
+    for element in root.iter():
+        if element.tag.endswith(suffix):
+            count += 1
+            if count > max_items:
+                raise_docx_traversal_limit(label, max_items)
+            yield element
+
+
+def validate_docx_xml_element_count(root: ElementTree.Element) -> None:
+    """Reject XML documents with excessive element counts."""
+
+    for index, _element in enumerate(root.iter(), start=1):
+        if index > MAX_DOCX_XML_ELEMENTS:
+            raise_docx_traversal_limit("XML elements", MAX_DOCX_XML_ELEMENTS)
+
+
+def raise_docx_traversal_limit(label: str, max_items: int) -> None:
+    """Raise a consistent DOCX traversal-limit error."""
+
+    msg = f"docx document has too many {label}; maximum is {max_items}"
+    raise ValueError(msg)
+
+
 def extract_docx_paragraph_snapshot(paragraph: ElementTree.Element) -> dict[str, Any]:
     """Extract a paragraph-level formatting snapshot."""
 
     paragraph_props = paragraph.find("w:pPr", WORD_NAMESPACE)
     runs: list[dict[str, Any]] = []
-    for run in paragraph.findall("w:r", WORD_NAMESPACE):
+    for run in iter_limited(
+        paragraph, "r", max_items=MAX_DOCX_RUNS_PER_PARAGRAPH, label="runs per paragraph"
+    ):
         run_snapshot = extract_docx_run_snapshot(run)
         if run_snapshot["text"] or any(
             run_snapshot[key] is not None
@@ -301,7 +365,13 @@ def extract_docx_run_snapshot(run: ElementTree.Element) -> dict[str, Any]:
 
     run_props = run.find("w:rPr", WORD_NAMESPACE)
     text = "".join(
-        node.text or "" for node in run.findall("w:t", WORD_NAMESPACE)
+        node.text or ""
+        for node in iter_limited(
+            run,
+            "t",
+            max_items=MAX_DOCX_TEXT_NODES_PER_RUN,
+            label="text nodes per run",
+        )
     ).strip()
     return {
         "text": text,
