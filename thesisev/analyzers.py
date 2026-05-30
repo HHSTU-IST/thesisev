@@ -36,7 +36,7 @@ def build_statistics(document: ThesisDocument) -> list[Statistic]:
     annotate_section_statistics(document)
     topic_analysis = annotate_topic_relevance(document)
     statistics = [
-        Statistic(label="总字数", value=str(document.total_word_count)),
+        Statistic(label="篇幅", value=str(document.total_word_count)),
         Statistic(label="章节数", value=str(len(document.sections))),
         Statistic(label="段落数", value=str(len(document.paragraphs))),
         Statistic(label="句子数", value=str(len(document.sentences))),

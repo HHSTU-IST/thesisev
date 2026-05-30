@@ -15,6 +15,7 @@ from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 
 DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
+DEFAULT_IOT_FORMAT_RUBRIC = "score_report_iot_f.json"
 REQUIRED_CRITERIA = (
     "选题及工作量",
     "调查论证",
@@ -341,7 +342,7 @@ def score_item_locally(
         return score_iot_cost(document, rubric_item)
     if rubric_item.name == "未来展望":
         return score_iot_outlook(document, rubric_item)
-    if rubric_item.name == "总字数":
+    if rubric_item.name == "篇幅":
         return score_iot_word_count(document, rubric_item)
     if rubric_item.name == "报告撰写":
         return score_iot_writing(document, issues, rubric_item)
@@ -568,7 +569,7 @@ def score_topic_workload(
     max_score = rubric_item.max_score
     score = 0.0
     evidence: list[str] = [
-        f"总字数 {document.total_word_count}",
+        f"篇幅 {document.total_word_count}",
         f"章节数 {len(document.sections)}",
         f"主题相关占比 {float(topic_analysis.get('document_ratio', 0)) * 100:.1f}%",
     ]
@@ -1016,7 +1017,7 @@ def score_iot_word_count(
         key="iot_word_count",
         rubric_item=rubric_item,
         score=score,
-        evidence=[f"总字数 {word_count}"],
+        evidence=[f"篇幅 {word_count}"],
         deductions=[] if word_count >= 2500 else ["篇幅不足"],
         suggestions=[] if word_count >= 2500 else ["补充图表说明和调研内容"],
     )
@@ -1049,14 +1050,29 @@ def score_iot_format(
 ) -> ScoreCriterion:
     """Score format compliance."""
 
+    format_rubric_items = normalize_rubric_payload(
+        load_json_resource(DEFAULT_IOT_FORMAT_RUBRIC)
+    )
+    if not format_rubric_items:
+        raise ValueError("format rubric is empty")
+    format_rubric_item = next(
+        (item for item in format_rubric_items if item.name == rubric_item.name),
+        None,
+    )
+    if format_rubric_item is None:
+        raise ValueError(f"format rubric missing criterion: {rubric_item.name}")
     format_count = (
         len(format_requirements.get("items", [])) if format_requirements else 0
     )
     penalty = sum(0.4 if issue.category == "标点误用" else 0.2 for issue in issues)
-    score = max(0.0, rubric_item.max_score - min(rubric_item.max_score * 0.8, penalty))
+    score = max(
+        0.0,
+        format_rubric_item.max_score
+        - min(format_rubric_item.max_score * 0.8, penalty),
+    )
     return build_criterion(
         key="iot_format",
-        rubric_item=rubric_item,
+        rubric_item=format_rubric_item,
         score=score,
         evidence=[f"格式要求条目 {format_count}", f"检测问题 {len(issues)} 项"],
         deductions=[] if not issues else ["格式规范存在偏差"],
@@ -1101,7 +1117,6 @@ def parse_rubric_item_payload(item: dict[str, Any]) -> dict[str, Any]:
         "criterion": item.get("criterion", ""),
         "score": item.get("score", 0),
         "standard": item.get("standard", item.get("standards", [])),
-        "evaluation": item.get("evaluation", item.get("评价方法", "llm")),
     }
 
 
@@ -1145,17 +1160,13 @@ def parse_rubric_value(value: Any) -> dict[str, Any]:
     """Parse either flat score values or nested standard-score objects."""
 
     if isinstance(value, int | float) and not isinstance(value, bool):
-        return {"score": float(value), "standard": [], "evaluation": "llm"}
+        return {"score": float(value), "standard": []}
     if isinstance(value, dict):
         score = value.get("score", value.get("分数"))
         standard = value.get("standard", value.get("standards", value.get("标准", [])))
         return {
             "score": parse_score_value(score),
             "standard": parse_standards(standard),
-            "evaluation": str(
-                value.get("evaluation", value.get("评价方法", "llm"))
-            ).strip()
-            or "llm",
         }
     msg = "score rubric item must be numeric or an object with score"
     raise ValueError(msg)
