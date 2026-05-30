@@ -114,19 +114,22 @@ def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
         document_xml = ElementTree.fromstring(archive.read("word/document.xml"))
 
     paragraphs: list[dict[str, Any]] = []
-    tables: list[dict[str, Any]] = []
-    sections: list[dict[str, Any]] = []
+    tables = [
+        extract_docx_table_snapshot(table)
+        for table in document_xml.findall(".//w:tbl", WORD_NAMESPACE)
+    ]
+    sections = [
+        extract_docx_section_snapshot(sect_pr)
+        for sect_pr in document_xml.findall(".//w:sectPr", WORD_NAMESPACE)
+    ]
 
-    for paragraph in document_xml.findall(".//w:p", WORD_NAMESPACE):
-        snapshot = extract_docx_paragraph_snapshot(paragraph)
-        if snapshot["text"] or snapshot["style"] or snapshot["runs"]:
-            paragraphs.append(snapshot)
-
-    for table in document_xml.findall(".//w:tbl", WORD_NAMESPACE):
-        tables.append(extract_docx_table_snapshot(table))
-
-    for sect_pr in document_xml.findall(".//w:sectPr", WORD_NAMESPACE):
-        sections.append(extract_docx_section_snapshot(sect_pr))
+    paragraphs.extend(
+        snapshot
+        for paragraph in document_xml.findall(".//w:p", WORD_NAMESPACE)
+        if (snapshot := extract_docx_paragraph_snapshot(paragraph))["text"]
+        or snapshot["style"]
+        or snapshot["runs"]
+    )
 
     if not sections:
         sections.append({})
@@ -387,23 +390,18 @@ def parse_sections(text: str) -> tuple[str, list[Section]]:
     """Split text into thesis sections using common heading patterns."""
 
     lines = text.splitlines()
-    headings: list[HeadingMatch] = []
-    for index, raw_line in enumerate(lines):
-        stripped = raw_line.strip()
-        if not stripped:
-            continue
-        heading = match_section_heading(stripped)
-        if heading is None:
-            continue
-        headings.append(
-            HeadingMatch(
-                line_index=index,
-                level=heading[0],
-                title=heading[1],
-                numbering=heading[2],
-                heading=heading[3],
-            )
+    headings = [
+        HeadingMatch(
+            line_index=index,
+            level=heading[0],
+            title=heading[1],
+            numbering=heading[2],
+            heading=heading[3],
         )
+        for index, raw_line in enumerate(lines)
+        if (stripped := raw_line.strip())
+        and (heading := match_section_heading(stripped)) is not None
+    ]
 
     if not headings:
         msg = "markdown file must contain explicit heading markers"

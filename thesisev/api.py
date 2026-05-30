@@ -92,6 +92,13 @@ MAX_HISTORY_ITEMS = 20
 templates = Jinja2Templates(directory=str(templates_dir()))
 app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
 
+EVALUATE_UPLOAD_FILE_DEFAULT = File(default=None)
+EVALUATE_UPLOAD_PRESET_DEFAULT = Form(default="thesis_tech")
+EVALUATE_UPLOAD_PROVIDER_DEFAULT = Form(default="deepseek")
+EVALUATE_UPLOAD_MODEL_DEFAULT = Form(default=None)
+EVALUATE_UPLOAD_TEMPERATURE_DEFAULT = Form(default=0.2)
+EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=400)
+
 PRESET_CONFIGS: dict[str, dict[str, str]] = {
     "thesis_tech": {
         "rubric": "score_thesis_tech.json",
@@ -182,12 +189,12 @@ def structure(request: StructureRequest) -> ApiResponse:
 
 @app.post("/evaluate/upload", response_model=ApiResponse)
 async def evaluate_upload(
-    file: UploadFile | None = File(default=None),
-    preset: str = Form(default="thesis_tech"),
-    provider: str = Form(default="deepseek"),
-    model: str | None = Form(default=None),
-    temperature: float = Form(default=0.2),
-    max_tokens: int = Form(default=400),
+    file: UploadFile | None = EVALUATE_UPLOAD_FILE_DEFAULT,
+    preset: str = EVALUATE_UPLOAD_PRESET_DEFAULT,
+    provider: str = EVALUATE_UPLOAD_PROVIDER_DEFAULT,
+    model: str | None = EVALUATE_UPLOAD_MODEL_DEFAULT,
+    temperature: float = EVALUATE_UPLOAD_TEMPERATURE_DEFAULT,
+    max_tokens: int = EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT,
 ) -> ApiResponse:
     """Evaluate an uploaded thesis file."""
 
@@ -369,6 +376,10 @@ def parse_format_requirements_file(path: Path, *, source_name: str) -> dict[str,
     if isinstance(payload, dict) and "sections" in payload:
         return normalize_structured_format_requirements(
             payload, source_name=source_name
+        )
+    if isinstance(payload, list):
+        return normalize_structured_format_requirements(
+            {"sections": payload}, source_name=source_name
         )
     items = normalize_format_requirements_payload(payload)
     return {"items": items, "item_count": len(items), "source_name": source_name}

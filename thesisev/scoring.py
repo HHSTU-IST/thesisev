@@ -1063,8 +1063,7 @@ def score_iot_format(
     """Score format compliance."""
 
     format_spec = load_json_resource(DEFAULT_IOT_FORMAT_RUBRIC)
-    if not isinstance(format_spec, dict):
-        raise ValueError("format rubric must be an object")
+    format_spec = normalize_format_spec_payload(format_spec)
     rules = extract_format_rules(format_spec)
     if not rules:
         raise ValueError("format rubric rules are empty")
@@ -1676,6 +1675,17 @@ def parse_float_value(value: Any) -> float:
         msg = "numeric format rubric value required"
         raise ValueError(msg)
     return float(value)
+
+
+def normalize_format_spec_payload(payload: Any) -> dict[str, Any]:
+    """Normalize format spec payloads into the internal structured shape."""
+
+    if isinstance(payload, list):
+        return {"sections": payload}
+    if isinstance(payload, dict) and "sections" in payload:
+        return payload
+    msg = "format rubric JSON must be a list or an object with sections"
+    raise ValueError(msg)
 
 
 def resolve_rubric_items(
