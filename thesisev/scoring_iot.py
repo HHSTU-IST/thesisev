@@ -236,7 +236,7 @@ def score_iot_format(
         0.0,
         rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["deduction"]),
     )
-    return build_criterion(
+    criterion = build_criterion(
         key="iot_format",
         rubric_item=rubric_item,
         score=score,
@@ -249,3 +249,5 @@ def score_iot_format(
         deductions=summary["deductions"],
         suggestions=summary["suggestions"],
     )
+    criterion.evaluation = "local_program"
+    return criterion

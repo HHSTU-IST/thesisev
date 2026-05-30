@@ -120,7 +120,6 @@ function renderResults() {
   renderIssues(data.issues);
   renderTechList(data.technology_stack);
   renderSectionTree(data.document.root_sections);
-  renderRubric(data.metadata?.rubric || null);
 }
 
 function renderStatistics(statistics) {
@@ -145,18 +144,15 @@ function renderScoreDetail(scoreDetail) {
 
   metaNode.textContent =
     `分数来源: ${formatScoreSource(scoreDetail.score_source || "local")} | ` +
-    `评分标准: ${scoreDetail.rubric_source || "score_thesis_tech.json"} | ` +
     `原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total} | ` +
     `百分制: ${scoreDetail.score}`;
   scoreDetail.criteria.forEach((item) => {
     const li = document.createElement("li");
     const deductions = (item.deductions || []).join("；") || "无明显扣分项";
-    const standards = (item.standards || []).join("；") || "暂无标准说明";
     const title = document.createElement("strong");
     title.textContent = `${item.name}: ${item.score}/${item.max_score}`;
     li.appendChild(title);
 
-    li.appendChild(buildSubline(`标准: ${standards}`));
     li.appendChild(buildSubline(`方法: ${formatEvaluationMethod(item)}`));
     appendScoreEvidence(li, item);
     li.appendChild(buildSubline(`扣分: ${deductions}`));
@@ -388,31 +384,6 @@ function renderHistory(items) {
   });
 }
 
-function renderRubric(rubric) {
-  const metaNode = document.getElementById("rubric-meta");
-  const listNode = document.getElementById("rubric-list");
-  listNode.innerHTML = "";
-
-  if (!rubric || !rubric.items || !rubric.items.length) {
-    metaNode.textContent = "未上传评分标准";
-    const li = document.createElement("li");
-    li.textContent = "暂无评分标准";
-    listNode.appendChild(li);
-    return;
-  }
-
-  metaNode.textContent =
-    `来源: ${rubric.source_name || "rubric.json"} | 总分: ${rubric.total_score}`;
-  rubric.items.forEach((item) => {
-    const li = document.createElement("li");
-    const standards = (item.standard || item.standards || []).join("；");
-    li.textContent = standards
-      ? `${item.criterion}: ${item.score} | ${standards}`
-      : `${item.criterion}: ${item.score}`;
-    listNode.appendChild(li);
-  });
-}
-
 function renderModelMeta(modelMeta, scoreSource, commentSource, roles) {
   const node = document.getElementById("model-meta");
   node.replaceChildren();
@@ -493,7 +464,6 @@ function buildMarkdown(data) {
   const tech = data.technology_stack.length
     ? data.technology_stack.map((item) => `- ${item}`).join("\n")
     : "- 未识别到明确技术栈";
-  const rubric = buildRubricMarkdown(data.metadata?.rubric || null);
   const scoreDetail = buildScoreDetailMarkdown(data.metadata?.score_detail || null);
   const formatRequirements = buildFormatRequirementsMarkdown(
     data.metadata?.format_requirements || null,
@@ -529,29 +499,10 @@ function buildMarkdown(data) {
     "",
     tech,
     "",
-    "## 评分标准",
-    "",
-    rubric,
-    "",
     "## 格式要求",
     "",
     formatRequirements,
   ].join("\n");
-}
-
-function buildRubricMarkdown(rubric) {
-  if (!rubric || !rubric.items || !rubric.items.length) {
-    return "- 未上传评分标准";
-  }
-  return rubric.items
-    .map((item) => {
-      const standards = (item.standard || item.standards || []).join("；");
-      return standards
-        ? `- ${item.criterion}: ${item.score} | ${standards}`
-        : `- ${item.criterion}: ${item.score}`;
-    })
-    .concat([`- 总分: ${rubric.total_score}`])
-    .join("\n");
 }
 
 function buildScoreDetailMarkdown(scoreDetail) {

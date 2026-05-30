@@ -100,6 +100,7 @@ def score_format_rules(
     deductions: list[str] = []
     suggestions: list[str] = []
     deduction = 0.0
+    seen_penalty_keys: set[str] = set()
 
     for rule in rules:
         signal = normalize_rule_check(rule)
@@ -155,9 +156,14 @@ def score_format_rules(
             rule_evidence = f"{rule_evidence}；期望 {expected_text}"
         evidence.append(rule_evidence)
         if matched:
-            deduction += parse_float_value(rule.get("points", 1)) * parse_float_value(
+            penalty_key = str(rule.get("id") or rule.get("label") or "").strip()
+            if penalty_key in seen_penalty_keys:
+                continue
+            seen_penalty_keys.add(penalty_key)
+            rule_penalty = parse_float_value(rule.get("points", 1)) * parse_float_value(
                 rule.get("section_weight", 1)
             )
+            deduction += min(rule_penalty, 3.0)
             deductions.append(f"{rule['label']} 不符合要求")
             if suggestion:
                 suggestions.append(str(suggestion))

@@ -233,7 +233,21 @@ def score_writing_quality(
 
     max_score = rubric_item.max_score
     severity_weights = {"low": 0.35, "medium": 0.65, "high": 1.0}
-    deduction = sum(severity_weights.get(issue.severity, 0.8) for issue in issues)
+    issue_counts: dict[tuple[str, str], int] = {}
+    issue_examples: dict[tuple[str, str], Issue] = {}
+    for issue in issues:
+        key = (issue.category, issue.rule_id)
+        issue_counts[key] = issue_counts.get(key, 0) + 1
+        issue_examples.setdefault(key, issue)
+
+    deduction = 0.0
+    for key, count in issue_counts.items():
+        issue = issue_examples[key]
+        issue_deduction = severity_weights.get(issue.severity, 0.8)
+        if issue.category == "标点误用":
+            deduction += min(issue_deduction * count, 3.0)
+            continue
+        deduction += issue_deduction * count
     if len(document.sections) <= 1:
         deduction += 1.2
     if not document.abstract:
