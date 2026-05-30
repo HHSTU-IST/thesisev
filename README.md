@@ -171,8 +171,8 @@ API JSON 输出示例：
       },
       "comment_source": "llm",
       "evaluation_roles": {
-        "format_detection": "local_program",
-        "format_evaluation": "local_program",
+        "format_detection": "local",
+        "format_evaluation": "local",
         "content_evaluation": "llm"
       },
       "model": {

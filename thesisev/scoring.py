@@ -205,7 +205,7 @@ def calculate_score_report_local(
     return build_score_report(
         criteria=criteria,
         rubric_source=rubric_source,
-        score_source="local_program",
+        score_source="local",
     )
 
 
@@ -267,7 +267,7 @@ def mark_llm_fallback_if_needed(
 ) -> ScoreCriterion:
     """Preserve method transparency when an LLM-configured item falls back locally."""
 
-    if requested_method == "llm" and criterion.evaluation == "local_program":
+    if requested_method == "llm" and criterion.evaluation == "local":
         criterion.evaluation = "llm_fallback_local"
     return criterion
 
@@ -388,11 +388,11 @@ def build_score_report(
 def determine_score_source(criteria: list[ScoreCriterion]) -> str:
     """Summarize how the final score was produced."""
 
-    sources = {item.evaluation or "local_program" for item in criteria}
+    sources = {item.evaluation or "local" for item in criteria}
     if sources == {"llm"}:
         return "llm"
-    if sources <= {"local", "local_program"}:
-        return "local_program"
+    if sources <= {"local"}:
+        return "local"
     return "mixed"
 
 
@@ -939,7 +939,7 @@ def build_format_rubric_item(format_filename: str) -> RubricItem:
     return RubricItem(
         name="格式规范",
         standards=build_format_standards(rules),
-        evaluation="local_program",
+        evaluation="local",
         max_score=sum_format_rule_points(rules),
     )
 
@@ -1089,7 +1089,7 @@ def build_criterion(
         score=clamped_score,
         max_score=rubric_item.max_score,
         standards=rubric_item.standards,
-        evaluation="local_program",
+        evaluation="local",
         evidence=evidence,
         deductions=ensure_deduction_visibility(
             score=clamped_score,

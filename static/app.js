@@ -109,7 +109,7 @@ function renderResults() {
   ).toFixed(1)}%`;
 
   const modelMeta = data.metadata?.model || {};
-  const scoreSource = data.metadata?.score_source || "local_program";
+  const scoreSource = data.metadata?.score_source || "local";
   const commentSource = data.metadata?.comment_source || "fallback";
   const roles = data.metadata?.evaluation_roles || {};
   renderModelMeta(modelMeta, scoreSource, commentSource, roles);
@@ -144,7 +144,7 @@ function renderScoreDetail(scoreDetail) {
   }
 
   metaNode.textContent =
-    `分数来源: ${formatScoreSource(scoreDetail.score_source || "local_program")} | ` +
+    `分数来源: ${formatScoreSource(scoreDetail.score_source || "local")} | ` +
     `评分标准: ${scoreDetail.rubric_source || "score_thesis_tech.json"} | ` +
     `原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total} | ` +
     `百分制: ${scoreDetail.score}`;
@@ -439,7 +439,7 @@ function renderModelMeta(modelMeta, scoreSource, commentSource, roles) {
   );
   node.appendChild(
     buildMetaChip(
-      `格式检测与评价: ${formatRoleSource(roles.format_evaluation || "local_program")}`,
+      `格式检测与评价: ${formatRoleSource(roles.format_evaluation || "local")}`,
       "is-score",
     ),
   );
@@ -505,9 +505,9 @@ function buildMarkdown(data) {
     `- 分数: ${data.score}`,
     `- 类型: ${data.document.source_type}`,
     `- 主题相关占比: ${(data.topic_relevance_ratio * 100).toFixed(1)}%`,
-    `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "local_program")}`,
+    `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "local")}`,
     `- 内容评价来源: ${formatCommentSource(data.metadata?.comment_source || "fallback")}`,
-    `- 格式检测与评价: ${formatRoleSource(data.metadata?.evaluation_roles?.format_evaluation || "local_program")}`,
+    `- 格式检测与评价: ${formatRoleSource(data.metadata?.evaluation_roles?.format_evaluation || "local")}`,
     "",
     "## 内容评价",
     "",
@@ -572,7 +572,7 @@ function buildScoreDetailMarkdown(scoreDetail) {
       ].join("\n");
     })
     .concat([
-      `- 分数来源: ${formatScoreSource(scoreDetail.score_source || "local_program")}`,
+      `- 分数来源: ${formatScoreSource(scoreDetail.score_source || "local")}`,
       `- 原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total}`,
       `- 百分制: ${scoreDetail.score}`,
     ])
@@ -603,7 +603,7 @@ function downloadFile(filename, mimeType, content) {
 }
 
 function formatScoreSource(source) {
-  if (source === "local_program") {
+  if (source === "local") {
     return "分数: 本地程序";
   }
   if (source === "rule_engine") {
@@ -623,7 +623,7 @@ function formatCommentSource(source) {
 }
 
 function formatRoleSource(source) {
-  if (source === "local_program") {
+  if (source === "local") {
     return "本地程序";
   }
   if (source === "llm") {
@@ -640,7 +640,7 @@ function formatEvaluationMethod(item) {
   if (method === "llm") {
     return "LLM";
   }
-  if (method === "local_program") {
+  if (method === "local") {
     return "本地程序";
   }
   if (method === "llm_fallback_local") {

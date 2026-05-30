@@ -736,8 +736,8 @@ def evaluate_document(
             "rubric": rubric,
             "format_requirements": format_requirements,
             "evaluation_roles": {
-                "format_detection": "local_program",
-                "format_evaluation": "local_program",
+                "format_detection": "local",
+                "format_evaluation": "local",
                 "content_evaluation": comment_source,
             },
             "model": runtime_model_config.to_metadata(),
