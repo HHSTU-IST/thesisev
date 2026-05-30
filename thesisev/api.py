@@ -302,10 +302,7 @@ def load_builtin_format_requirements_summary(
 
     if not filename:
         return None
-    return parse_format_requirements_file(
-        config_dir() / filename,
-        source_name=filename,
-    )
+    return parse_format_requirements_file(config_dir() / filename, source_name=filename)
 
 
 async def store_upload_file(
@@ -369,12 +366,10 @@ def parse_format_requirements_file(path: Path, *, source_name: str) -> dict[str,
     """Parse a stored format-requirements JSON file."""
 
     payload = parse_json_file(path, name="format requirements")
+    if isinstance(payload, dict) and "sections" in payload:
+        return normalize_structured_format_requirements(payload, source_name=source_name)
     items = normalize_format_requirements_payload(payload)
-    return {
-        "items": items,
-        "item_count": len(items),
-        "source_name": source_name,
-    }
+    return {"items": items, "item_count": len(items), "source_name": source_name}
 
 
 async def parse_json_upload_payload(file: UploadFile, *, name: str) -> Any:
@@ -481,6 +476,49 @@ def normalize_format_requirements_payload(payload: Any) -> list[dict[str, str]]:
 
     msg = "format requirements JSON must be an object or a list"
     raise ValueError(msg)
+
+
+def normalize_structured_format_requirements(
+    payload: dict[str, Any], *, source_name: str
+) -> dict[str, Any]:
+    """Normalize the structured format rubric into a UI-friendly summary."""
+
+    sections = payload.get("sections", [])
+    if not isinstance(sections, list):
+        raise ValueError("format rubric sections must be a list")
+
+    section_items: list[dict[str, Any]] = []
+    display_items: list[dict[str, str]] = []
+    for section in sections:
+        if not isinstance(section, dict):
+            continue
+        section_label = str(section.get("name") or section.get("id") or "").strip()
+        rule_count = 0
+        for rule in section.get("rules", []):
+            if not isinstance(rule, dict):
+                continue
+            rule_count += 1
+            display_items.append(
+                {
+                    "label": f"{section_label} / {str(rule.get('label') or rule.get('id') or '').strip()}",
+                    "value": stringify_format_requirement_value(rule.get("expected", "")),
+                }
+            )
+        section_items.append(
+            {
+                "label": section_label,
+                "weight": section.get("weight", 0),
+                "rule_count": rule_count,
+            }
+        )
+
+    return {
+        "source_name": source_name,
+        "item_count": len(display_items),
+        "items": display_items,
+        "sections": section_items,
+        "metadata": payload.get("metadata", {}),
+    }
 
 
 def parse_rubric_score(score: Any) -> float:

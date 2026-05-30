@@ -1067,7 +1067,7 @@ def score_iot_format(
     )
     score = max(
         0.0,
-        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["penalty"]),
+        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["deduction"]),
     )
     return build_criterion(
         key="iot_format",
@@ -1096,20 +1096,20 @@ def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
         for rule in section.get("rules", []):
             if not isinstance(rule, dict):
                 continue
-            signal = rule.get("signal", {})
-            if not isinstance(signal, dict):
-                signal = {}
+            check = rule.get("check", rule.get("signal", {}))
+            if not isinstance(check, dict):
+                check = {}
+            expected = rule.get("expected", {})
             rules.append(
                 {
                     "section": section_name,
                     "section_weight": section_weight,
                     "id": str(rule.get("id") or "").strip(),
                     "label": str(rule.get("label") or "").strip(),
-                    "expected": rule.get("expected", ""),
-                    "severity": str(rule.get("severity", "low")).strip() or "low",
-                    "penalty": parse_float_value(rule.get("penalty", 1)),
+                    "points": parse_float_value(rule.get("points", 1)),
+                    "expected": expected,
+                    "check": check,
                     "hint": str(rule.get("hint", "")).strip(),
-                    "signal": signal,
                 }
             )
     return rules
@@ -1139,7 +1139,7 @@ def summarize_format_spec(
         "items": [
             {
                 "label": f"{rule['section']} / {rule['label']}",
-                "value": str(rule["expected"]) if rule["expected"] else rule["id"],
+                "value": format_expected_value(rule["expected"]) or rule["id"],
             }
             for rule in rules
         ],
@@ -1161,10 +1161,10 @@ def score_format_rules(
     evidence: list[str] = []
     deductions: list[str] = []
     suggestions: list[str] = []
-    penalty = 0.0
+    deduction = 0.0
 
     for rule in rules:
-        signal = rule.get("signal", {})
+        signal = rule.get("check", rule.get("signal", {}))
         signal_type = str(signal.get("type", "")).strip()
         matched = False
         rule_evidence = ""
@@ -1202,17 +1202,21 @@ def score_format_rules(
             hit_count = count_terms(document.cleaned_text, tuple(terms))
             rule_evidence = f"{rule['label']}: {hit_count} 次关键词命中"
             matched = hit_count < min_hits
+        elif signal_type == "manual_review":
+            rule_evidence = f"{rule['label']}: 需人工核对"
+            matched = False
         else:
-            rule_evidence = f"{rule['label']}: 未定义检查类型"
-            matched = True
+            rule_evidence = f"{rule['label']}: 未定义检查类型，需人工核对"
+            matched = False
 
+        expected_text = format_expected_value(rule.get("expected"))
+        if expected_text:
+            rule_evidence = f"{rule_evidence}；期望 {expected_text}"
         evidence.append(rule_evidence)
         if matched:
-            severity = str(rule.get("severity", "low")).lower()
-            severity_multiplier = {"high": 1.25, "medium": 1.0, "low": 0.75}.get(
-                severity, 0.75
+            deduction += parse_float_value(rule.get("points", 1)) * parse_float_value(
+                rule.get("section_weight", 1)
             )
-            penalty += parse_float_value(rule.get("penalty", 1)) * severity_multiplier
             deductions.append(f"{rule['label']} 不符合要求")
             if suggestion:
                 suggestions.append(str(suggestion))
@@ -1221,7 +1225,7 @@ def score_format_rules(
         evidence.append("已读取内置格式要求，可用于人工复核")
 
     return {
-        "penalty": penalty,
+        "deduction": deduction,
         "evidence": evidence,
         "deductions": deduplicate_preserving_order(deductions),
         "suggestions": deduplicate_preserving_order(suggestions),
@@ -1232,10 +1236,23 @@ def build_format_suggestion(rule: dict[str, Any]) -> str:
     """Build a short suggestion for a failed format rule."""
 
     label = str(rule.get("label", "")).strip() or str(rule.get("id", "")).strip()
-    expected = str(rule.get("expected", "")).strip()
+    expected = format_expected_value(rule.get("expected"))
     if expected:
         return f"对照规范检查{label}：{expected}"
     return f"对照规范检查{label}"
+
+
+def format_expected_value(value: Any) -> str:
+    """Format a rule expectation for display."""
+
+    if value in (None, ""):
+        return ""
+    if isinstance(value, dict):
+        parts = [f"{key}={value[key]}" for key in value]
+        return ", ".join(parts)
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value).strip()
 
 
 def normalize_string_list(value: Any) -> list[str]:
