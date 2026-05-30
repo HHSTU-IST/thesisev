@@ -3,6 +3,7 @@
     "preset": "report_iot",
     "name": "物联网报告格式规范",
     "target_model": "python-docx",
+    "expected_schema": "expected_items",
     "version": "1.0"
   },
   "sections": [
@@ -15,50 +16,95 @@
           "id": "title_font",
           "label": "一级标题字体",
           "points": 2,
-          "expected": {
-            "paragraph.style": "Heading 1",
-            "run.font.name": "黑体",
-            "run.font.size": "16pt",
-            "run.font.bold": true
-          },
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Heading 1"
+            },
+            {
+              "path": "run.font.name",
+              "value": "黑体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "16pt"
+            },
+            {
+              "path": "run.font.bold",
+              "value": true
+            }
+          ],
           "check": {
-            "type": "manual_review"
-          },
-          "hint": "核对一级标题是否使用 Heading 1 样式，且字体为黑体、16pt、加粗。"
+            "type": "docx_expected"
+          }
         },
         {
           "id": "subtitle_font",
           "label": "二级标题字体",
           "points": 2,
-          "expected": {
-            "paragraph.style": "Heading 2",
-            "run.font.name": "黑体",
-            "run.font.size": "14pt",
-            "run.font.bold": true
-          },
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Heading 2"
+            },
+            {
+              "path": "run.font.name",
+              "value": "黑体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "14pt"
+            },
+            {
+              "path": "run.font.bold",
+              "value": true
+            }
+          ],
           "check": {
-            "type": "manual_review"
-          },
-          "hint": "核对二级标题是否使用 Heading 2 样式，且字体为黑体、14pt、加粗。"
+            "type": "docx_expected"
+          }
         },
         {
           "id": "body_font",
           "label": "正文格式",
           "points": 3,
-          "expected": {
-            "paragraph.style": "Normal",
-            "run.font.name": "宋体",
-            "run.font.size": "12pt",
-            "paragraph.alignment": "WD_ALIGN_PARAGRAPH.JUSTIFY",
-            "paragraph_format.line_spacing": 1.5,
-            "paragraph_format.space_before": "0pt",
-            "paragraph_format.space_after": "0pt",
-            "paragraph_format.first_line_indent": "2em"
-          },
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Normal"
+            },
+            {
+              "path": "run.font.name",
+              "value": "宋体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "12pt"
+            },
+            {
+              "path": "paragraph.alignment",
+              "value": "WD_ALIGN_PARAGRAPH.JUSTIFY"
+            },
+            {
+              "path": "paragraph_format.line_spacing",
+              "value": 1.5
+            },
+            {
+              "path": "paragraph_format.space_before",
+              "value": "0pt"
+            },
+            {
+              "path": "paragraph_format.space_after",
+              "value": "0pt"
+            },
+            {
+              "path": "paragraph_format.first_line_indent",
+              "value": "24pt"
+            }
+          ],
           "check": {
-            "type": "manual_review"
-          },
-          "hint": "核对正文是否采用宋体 12pt、1.5 倍行距、两端对齐、首行缩进 2 字符。"
+            "type": "docx_expected"
+          }
         }
       ]
     },
@@ -71,41 +117,59 @@
           "id": "paragraph_spacing",
           "label": "段前段后",
           "points": 2,
-          "expected": {
-            "paragraph_format.space_before": "0pt",
-            "paragraph_format.space_after": "0pt"
-          },
+          "expected": [
+            {
+              "path": "paragraph_format.space_before",
+              "value": "0pt"
+            },
+            {
+              "path": "paragraph_format.space_after",
+              "value": "0pt"
+            }
+          ],
           "check": {
-            "type": "manual_review"
-          },
-          "hint": "核对正文段前和段后是否均为 0pt。"
+            "type": "docx_expected"
+          }
         },
         {
           "id": "table_alignment",
           "label": "表格居中",
           "points": 2,
-          "expected": {
-            "table.alignment": "WD_TABLE_ALIGNMENT.CENTER"
-          },
+          "expected": [
+            {
+              "path": "table.alignment",
+              "value": "WD_TABLE_ALIGNMENT.CENTER"
+            }
+          ],
           "check": {
-            "type": "manual_review"
-          },
-          "hint": "核对表格整体是否居中对齐。"
+            "type": "docx_expected"
+          }
         },
         {
           "id": "page_margins",
           "label": "页边距",
           "points": 2,
-          "expected": {
-            "section.top_margin": "2.5cm",
-            "section.bottom_margin": "2.5cm",
-            "section.left_margin": "3cm",
-            "section.right_margin": "2.5cm"
-          },
+          "expected": [
+            {
+              "path": "section.top_margin",
+              "value": "2.5cm"
+            },
+            {
+              "path": "section.bottom_margin",
+              "value": "2.5cm"
+            },
+            {
+              "path": "section.left_margin",
+              "value": "3cm"
+            },
+            {
+              "path": "section.right_margin",
+              "value": "2.5cm"
+            }
+          ],
           "check": {
             "type": "manual_review"
-          },
-          "hint": "核对页面四周边距是否符合模板要求。"
+          }
         }
       ]
     },
@@ -118,28 +182,32 @@
           "id": "word_count",
           "label": "篇幅",
           "points": 2,
-          "expected": {
-            "document.word_count": "3500~4000"
-          },
+          "expected": [
+            {
+              "path": "document.word_count",
+              "value": "3500~4000"
+            }
+          ],
           "check": {
             "type": "word_count_range",
             "min": 3500,
             "max": 4000
-          },
-          "hint": "核对全文篇幅是否落在 3500 到 4000 字之间。"
+          }
         },
         {
           "id": "section_count",
           "label": "章节完整性",
           "points": 2,
-          "expected": {
-            "document.section_count": ">=4"
-          },
+          "expected": [
+            {
+              "path": "document.section_count",
+              "value": ">=4"
+            }
+          ],
           "check": {
             "type": "section_count_min",
             "min": 4
-          },
-          "hint": "核对报告是否包含足够的章节结构。"
+          }
         }
       ]
     }

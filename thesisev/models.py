@@ -72,6 +72,7 @@ class ThesisDocument:
     paragraphs: list[Paragraph]
     sentences: list[str]
     total_word_count: int
+    format_snapshot: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the document to a JSON-friendly dictionary."""
@@ -86,6 +87,7 @@ class ThesisDocument:
             "total_word_count": self.total_word_count,
             "paragraphs": [asdict(paragraph) for paragraph in self.paragraphs],
             "sentences": self.sentences,
+            "format_snapshot": self.format_snapshot,
             "sections": [section.to_dict() for section in self.sections],
             "root_sections": [section.to_dict() for section in self.root_sections],
         }

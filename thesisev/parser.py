@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from zipfile import ZipFile
 
 from defusedxml import ElementTree
@@ -43,6 +44,11 @@ def load_document(path: str | Path) -> ThesisDocument:
 
     source_path = Path(path)
     raw_text = read_source_text(source_path)
+    format_snapshot = (
+        read_docx_format_snapshot(source_path)
+        if source_path.suffix.lower() == ".docx"
+        else {}
+    )
     cleaned_text = clean_text(raw_text)
     lines = [line.strip() for line in cleaned_text.splitlines()]
     title = next((line for line in lines if line), source_path.stem)
@@ -53,6 +59,10 @@ def load_document(path: str | Path) -> ThesisDocument:
     sentences = flatten_sentence_text(paragraphs)
     total_word_count = sum(paragraph.word_count for paragraph in paragraphs)
     abstract = find_abstract(sections, front_matter)
+    if isinstance(format_snapshot, dict):
+        format_snapshot["word_count"] = total_word_count
+        format_snapshot["section_count"] = len(sections)
+
     return ThesisDocument(
         title=title,
         source_path=str(source_path),
@@ -66,6 +76,7 @@ def load_document(path: str | Path) -> ThesisDocument:
         paragraphs=paragraphs,
         sentences=sentences,
         total_word_count=total_word_count,
+        format_snapshot=format_snapshot,
     )
 
 
@@ -94,6 +105,255 @@ def read_docx_text(path: Path) -> str:
         if text:
             paragraphs.append(text)
     return "\n\n".join(paragraphs)
+
+
+def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
+    """Extract a compact formatting snapshot from a docx file."""
+
+    with ZipFile(path) as archive:
+        document_xml = ElementTree.fromstring(archive.read("word/document.xml"))
+
+    paragraphs: list[dict[str, Any]] = []
+    tables: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
+
+    for paragraph in document_xml.findall(".//w:p", WORD_NAMESPACE):
+        snapshot = extract_docx_paragraph_snapshot(paragraph)
+        if snapshot["text"] or snapshot["style"] or snapshot["runs"]:
+            paragraphs.append(snapshot)
+
+    for table in document_xml.findall(".//w:tbl", WORD_NAMESPACE):
+        tables.append(extract_docx_table_snapshot(table))
+
+    for sect_pr in document_xml.findall(".//w:sectPr", WORD_NAMESPACE):
+        sections.append(extract_docx_section_snapshot(sect_pr))
+
+    if not sections:
+        sections.append({})
+
+    return {
+        "paragraphs": paragraphs,
+        "tables": tables,
+        "sections": sections,
+    }
+
+
+def extract_docx_paragraph_snapshot(paragraph: ElementTree.Element) -> dict[str, Any]:
+    """Extract a paragraph-level formatting snapshot."""
+
+    paragraph_props = paragraph.find("w:pPr", WORD_NAMESPACE)
+    runs: list[dict[str, Any]] = []
+    for run in paragraph.findall("w:r", WORD_NAMESPACE):
+        run_snapshot = extract_docx_run_snapshot(run)
+        if run_snapshot["text"] or any(
+            run_snapshot[key] is not None
+            for key in ("font_name", "font_size_pt", "bold")
+        ):
+            runs.append(run_snapshot)
+
+    text = "".join(run.get("text", "") for run in runs).strip()
+    primary_run = next(
+        (run for run in runs if run.get("text")), runs[0] if runs else {}
+    )
+    return {
+        "text": text,
+        "style": normalize_docx_style_name(
+            get_docx_attr_value(paragraph_props, "pStyle")
+        ),
+        "alignment": normalize_docx_alignment(
+            get_docx_attr_value(paragraph_props, "jc")
+        ),
+        "line_spacing": parse_docx_line_spacing(paragraph_props),
+        "space_before_pt": parse_docx_twips(
+            get_docx_child(paragraph_props, "spacing"), "before"
+        ),
+        "space_after_pt": parse_docx_twips(
+            get_docx_child(paragraph_props, "spacing"), "after"
+        ),
+        "first_line_indent_pt": parse_docx_indentation(
+            get_docx_child(paragraph_props, "ind"), "firstLine"
+        ),
+        "runs": runs,
+        "run": primary_run,
+    }
+
+
+def extract_docx_run_snapshot(run: ElementTree.Element) -> dict[str, Any]:
+    """Extract a run-level formatting snapshot."""
+
+    run_props = run.find("w:rPr", WORD_NAMESPACE)
+    text = "".join(
+        node.text or "" for node in run.findall("w:t", WORD_NAMESPACE)
+    ).strip()
+    return {
+        "text": text,
+        "font_name": parse_docx_font_name(run_props),
+        "font_size_pt": parse_docx_font_size(run_props),
+        "bold": parse_docx_bool(get_docx_child(run_props, "b")),
+    }
+
+
+def extract_docx_table_snapshot(table: ElementTree.Element) -> dict[str, Any]:
+    """Extract a table-level formatting snapshot."""
+
+    table_props = table.find("w:tblPr", WORD_NAMESPACE)
+    return {
+        "alignment": normalize_docx_alignment(get_docx_attr_value(table_props, "jc")),
+    }
+
+
+def extract_docx_section_snapshot(section: ElementTree.Element) -> dict[str, Any]:
+    """Extract a section-level formatting snapshot."""
+
+    margins = get_docx_child(section, "pgMar")
+    return {
+        "top_margin_pt": parse_docx_twips(margins, "top"),
+        "bottom_margin_pt": parse_docx_twips(margins, "bottom"),
+        "left_margin_pt": parse_docx_twips(margins, "left"),
+        "right_margin_pt": parse_docx_twips(margins, "right"),
+    }
+
+
+def get_docx_child(
+    parent: ElementTree.Element | None, name: str
+) -> ElementTree.Element | None:
+    """Return a child element by local name."""
+
+    if parent is None:
+        return None
+    return parent.find(f"w:{name}", WORD_NAMESPACE)
+
+
+def get_docx_attr_value(parent: ElementTree.Element | None, name: str) -> str | None:
+    """Return the w:val attribute from a docx child element."""
+
+    child = get_docx_child(parent, name)
+    if child is None:
+        return None
+    value = child.get(f"{{{WORD_NAMESPACE['w']}}}val")
+    if value is None:
+        return None
+    return value.strip()
+
+
+def parse_docx_bool(element: ElementTree.Element | None) -> bool | None:
+    """Parse a w:b-like boolean element."""
+
+    if element is None:
+        return None
+    value = element.get(f"{{{WORD_NAMESPACE['w']}}}val")
+    if value is None:
+        return True
+    return value not in {"0", "false", "off"}
+
+
+def parse_docx_font_name(run_props: ElementTree.Element | None) -> str | None:
+    """Parse the first usable font name from run properties."""
+
+    fonts = get_docx_child(run_props, "rFonts")
+    if fonts is None:
+        return None
+    for attr in ("eastAsia", "ascii", "hAnsi"):
+        value = fonts.get(f"{{{WORD_NAMESPACE['w']}}}{attr}")
+        if value:
+            return value.strip()
+    return None
+
+
+def parse_docx_font_size(run_props: ElementTree.Element | None) -> float | None:
+    """Parse run font size in points."""
+
+    size_element = get_docx_child(run_props, "sz")
+    if size_element is None:
+        return None
+    raw_value = size_element.get(f"{{{WORD_NAMESPACE['w']}}}val")
+    if not raw_value:
+        return None
+    try:
+        return round(float(raw_value) / 2, 2)
+    except ValueError:
+        return None
+
+
+def parse_docx_line_spacing(
+    paragraph_props: ElementTree.Element | None,
+) -> float | None:
+    """Parse paragraph line spacing into a float ratio when possible."""
+
+    spacing = get_docx_child(paragraph_props, "spacing")
+    if spacing is None:
+        return None
+    line_rule = spacing.get(f"{{{WORD_NAMESPACE['w']}}}lineRule")
+    raw_value = spacing.get(f"{{{WORD_NAMESPACE['w']}}}line")
+    if not raw_value:
+        return None
+    try:
+        numeric_value = float(raw_value)
+    except ValueError:
+        return None
+    if line_rule in {"auto", "autoSpacing"}:
+        return round(numeric_value / 240, 2)
+    return round(numeric_value / 20, 2)
+
+
+def parse_docx_indentation(
+    paragraph_indent: ElementTree.Element | None, attr_name: str
+) -> float | None:
+    """Parse paragraph indentation from twips to points."""
+
+    if paragraph_indent is None:
+        return None
+    raw_value = paragraph_indent.get(f"{{{WORD_NAMESPACE['w']}}}{attr_name}")
+    if raw_value is None:
+        return None
+    try:
+        return round(float(raw_value) / 20, 2)
+    except ValueError:
+        return None
+
+
+def parse_docx_twips(
+    element: ElementTree.Element | None, attr_name: str
+) -> float | None:
+    """Parse a twips-based docx attribute into points."""
+
+    if element is None:
+        return None
+    raw_value = element.get(f"{{{WORD_NAMESPACE['w']}}}{attr_name}")
+    if raw_value is None:
+        return None
+    try:
+        return round(float(raw_value) / 20, 2)
+    except ValueError:
+        return None
+
+
+def normalize_docx_style_name(value: str | None) -> str | None:
+    """Normalize a docx style identifier into a display name."""
+
+    if not value:
+        return None
+    normalized = value.replace("_", " ").strip()
+    normalized = re.sub(r"(?<=\D)(\d+)$", r" \1", normalized)
+    return normalized
+
+
+def normalize_docx_alignment(value: str | None) -> str | None:
+    """Normalize docx alignment values to a canonical token."""
+
+    if not value:
+        return None
+    token = value.strip().lower()
+    aliases = {
+        "both": "justify",
+        "justified": "justify",
+        "center": "center",
+        "centre": "center",
+        "left": "left",
+        "right": "right",
+        "distribute": "distribute",
+    }
+    return aliases.get(token, token)
 
 
 def clean_text(text: str) -> str:
