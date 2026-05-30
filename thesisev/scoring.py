@@ -15,6 +15,9 @@ from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 
 DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
+FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
+    "score_report_iot.json": "score_report_iot_f.json",
+}
 REQUIRED_CRITERIA = (
     "选题及工作量",
     "调查论证",
@@ -900,13 +903,70 @@ def resolve_rubric_items(
 ) -> tuple[list[RubricItem], str]:
     """Resolve rubric items from upload metadata or bundled config."""
 
-    default_items = normalize_rubric_payload(load_json_resource(rubric_filename))
+    default_items = append_builtin_format_rubric_item(
+        normalize_rubric_payload(load_json_resource(rubric_filename)),
+        rubric_filename=rubric_filename,
+    )
     if rubric and rubric.get("items"):
         return merge_rubric_items(
             default_items,
             normalize_rubric_items(rubric["items"], require_all=False),
         ), rubric.get("source_name", "uploaded_rubric.json")
     return default_items, rubric_filename
+
+
+def append_builtin_format_rubric_item(
+    items: list[RubricItem], *, rubric_filename: str
+) -> list[RubricItem]:
+    """Append built-in format scoring derived from the paired format JSON."""
+
+    if any(item.name == "格式规范" for item in items):
+        return items
+    format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
+    if not format_filename:
+        return items
+    return [*items, build_format_rubric_item(format_filename)]
+
+
+def build_format_rubric_item(format_filename: str) -> RubricItem:
+    """Build a local format rubric item from a bundled format specification."""
+
+    format_spec = normalize_format_spec_payload(load_json_resource(format_filename))
+    rules = extract_format_rules(format_spec)
+    if not rules:
+        msg = f"format rubric rules are empty: {format_filename}"
+        raise ValueError(msg)
+    return RubricItem(
+        name="格式规范",
+        standards=build_format_standards(rules),
+        evaluation="local_program",
+        max_score=sum_format_rule_points(rules),
+    )
+
+
+def sum_format_rule_points(rules: list[dict[str, Any]]) -> float:
+    """Calculate the format full score from rule points and section weights."""
+
+    total = sum(
+        parse_float_value(rule.get("points", 0))
+        * parse_float_value(rule.get("section_weight", 1))
+        for rule in rules
+    )
+    return round(total, 4)
+
+
+def build_format_standards(rules: list[dict[str, Any]]) -> list[str]:
+    """Create compact human-readable standards from structured format rules."""
+
+    standards: list[str] = []
+    for rule in rules:
+        label = str(rule.get("label") or rule.get("id") or "").strip()
+        expected = format_expected_value(get_rule_expected(rule))
+        if label and expected:
+            standards.append(f"{label}: {expected}")
+        elif label:
+            standards.append(label)
+    return standards
 
 
 def normalize_rubric_payload(payload: Any) -> list[RubricItem]:

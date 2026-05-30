@@ -55,13 +55,5 @@
         ],
         "score": 20,
         "evaluation": "llm"
-    },
-    "格式规范": {
-        "standard": [
-            "格式检测与评价使用内置格式规范",
-            "格式满分为20分"
-        ],
-        "score": 20,
-        "evaluation": "local_program"
     }
 }

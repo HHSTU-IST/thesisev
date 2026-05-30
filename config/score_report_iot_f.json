@@ -5,7 +5,7 @@
     "weight": 1,
     "rules": [
       {
-        "id": "title_font",
+        "id": "chapter_font",
         "label": "二级标题字体",
         "points": 2,
         "check": {
@@ -22,16 +22,12 @@
             {
               "path": "run.font.size",
               "value": "16pt"
-            },
-            {
-              "path": "run.font.bold",
-              "value": true
             }
           ]
         }
       },
       {
-        "id": "subtitle_font",
+        "id": "subchapter_font",
         "label": "三级标题字体",
         "points": 2,
         "check": {
@@ -48,10 +44,6 @@
             {
               "path": "run.font.size",
               "value": "14pt"
-            },
-            {
-              "path": "run.font.bold",
-              "value": true
             }
           ]
         }
@@ -59,7 +51,7 @@
       {
         "id": "body_font",
         "label": "正文格式",
-        "points": 3,
+        "points": 5,
         "check": {
           "type": "docx_expected",
           "expected": [
@@ -76,10 +68,6 @@
               "value": "12pt"
             },
             {
-              "path": "paragraph.alignment",
-              "value": "WD_ALIGN_PARAGRAPH.JUSTIFY"
-            },
-            {
               "path": "paragraph_format.line_spacing",
               "value": 1.5
             },
@@ -93,7 +81,7 @@
             },
             {
               "path": "paragraph_format.first_line_indent",
-              "value": "24pt"
+              "value": "2ch"
             }
           ]
         }
@@ -126,39 +114,13 @@
       {
         "id": "table_alignment",
         "label": "表格居中",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "docx_expected",
           "expected": [
             {
               "path": "table.alignment",
               "value": "WD_TABLE_ALIGNMENT.CENTER"
-            }
-          ]
-        }
-      },
-      {
-        "id": "page_margins",
-        "label": "页边距",
-        "points": 2,
-        "check": {
-          "type": "manual_review",
-          "expected": [
-            {
-              "path": "section.top_margin",
-              "value": "2.5cm"
-            },
-            {
-              "path": "section.bottom_margin",
-              "value": "2.5cm"
-            },
-            {
-              "path": "section.left_margin",
-              "value": "3cm"
-            },
-            {
-              "path": "section.right_margin",
-              "value": "2.5cm"
             }
           ]
         }
@@ -173,7 +135,7 @@
       {
         "id": "word_count",
         "label": "篇幅",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "word_count_range",
           "expected": [
@@ -189,7 +151,7 @@
       {
         "id": "section_count",
         "label": "章节完整性",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "section_count_min",
           "expected": [
