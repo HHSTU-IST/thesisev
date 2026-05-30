@@ -498,16 +498,22 @@ def normalize_llm_score_criteria(
         if name not in rubric_by_name:
             raise ValueError(f"unknown rubric criterion: {name}")
         rubric_item = rubric_by_name[name]
+        score = round(parse_score_value(entry.get("score", 0)), 2)
+        deductions = parse_string_list(entry.get("deductions", []))
         criteria.append(
             ScoreCriterion(
                 key=str(entry.get("key") or item_by_key[name]),
                 name=rubric_item.name,
-                score=round(parse_score_value(entry.get("score", 0)), 2),
+                score=score,
                 max_score=rubric_item.max_score,
                 standards=rubric_item.standards,
                 evaluation=rubric_item.evaluation,
                 evidence=parse_string_list(entry.get("evidence", [])),
-                deductions=parse_string_list(entry.get("deductions", [])),
+                deductions=ensure_deduction_visibility(
+                    score=score,
+                    max_score=rubric_item.max_score,
+                    deductions=deductions,
+                ),
                 suggestions=parse_string_list(entry.get("suggestions", [])),
             )
         )
@@ -988,17 +994,33 @@ def build_criterion(
 ) -> ScoreCriterion:
     """Clamp and round a criterion score."""
 
+    clamped_score = round(max(0.0, min(rubric_item.max_score, score)), 2)
     return ScoreCriterion(
         key=key,
         name=rubric_item.name,
-        score=round(max(0.0, min(rubric_item.max_score, score)), 2),
+        score=clamped_score,
         max_score=rubric_item.max_score,
         standards=rubric_item.standards,
         evaluation="local_program",
         evidence=evidence,
-        deductions=deductions,
+        deductions=ensure_deduction_visibility(
+            score=clamped_score,
+            max_score=rubric_item.max_score,
+            deductions=deductions,
+        ),
         suggestions=suggestions,
     )
+
+
+def ensure_deduction_visibility(
+    *, score: float, max_score: float, deductions: list[str]
+) -> list[str]:
+    """Ensure non-full scores always expose a visible deduction reason."""
+
+    if deductions or score >= max_score:
+        return deductions
+    lost_points = round(max_score - score, 2)
+    return [f"未达到满分，扣 {lost_points:g} 分；请结合评分标准和证据项复核"]
 
 
 def ratio_from_thresholds(

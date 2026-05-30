@@ -25,8 +25,22 @@ SECTION_PATTERN = re.compile(
 )
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
-MERMAID_FENCE_PATTERN = re.compile(
-    r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$"
+MERMAID_FENCE_PATTERN = re.compile(r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$")
+MERMAID_HEADING_PATTERN = re.compile(
+    r"(?i)\b("
+    r"graph\s+(?:td|bt|lr|rl)"
+    r"|flowchart\s+(?:td|bt|lr|rl)"
+    r"|sequencediagram"
+    r"|classdiagram"
+    r"|statediagram"
+    r"|erdiagram"
+    r"|gantt"
+    r"|pie"
+    r"|journey"
+    r"|gitgraph"
+    r"|mindmap"
+    r"|timeline"
+    r")\b"
 )
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DOCX_DOCUMENT_XML = "word/document.xml"
@@ -202,7 +216,9 @@ def read_docx_document_xml(path: Path) -> bytes:
         with ZipFile(path) as archive:
             validate_docx_archive_members(archive)
             document_info = get_docx_document_xml_info(archive)
-            validate_docx_member_size(document_info, max_size=MAX_DOCX_DOCUMENT_XML_BYTES)
+            validate_docx_member_size(
+                document_info, max_size=MAX_DOCX_DOCUMENT_XML_BYTES
+            )
             return read_zip_member_limited(
                 archive, document_info, max_size=MAX_DOCX_DOCUMENT_XML_BYTES
             )
@@ -227,7 +243,9 @@ def validate_docx_archive_members(archive: ZipFile) -> None:
 
     members = archive.infolist()
     if len(members) > MAX_DOCX_MEMBER_COUNT:
-        msg = f"docx archive has too many zip members; maximum is {MAX_DOCX_MEMBER_COUNT}"
+        msg = (
+            f"docx archive has too many zip members; maximum is {MAX_DOCX_MEMBER_COUNT}"
+        )
         raise ValueError(msg)
 
     total_uncompressed = 0
@@ -273,7 +291,9 @@ def validate_docx_member_size(member: ZipInfo, *, max_size: int) -> None:
             raise ValueError(msg)
 
 
-def read_zip_member_limited(archive: ZipFile, member: ZipInfo, *, max_size: int) -> bytes:
+def read_zip_member_limited(
+    archive: ZipFile, member: ZipInfo, *, max_size: int
+) -> bytes:
     """Read a zip member in chunks while enforcing an output limit."""
 
     chunks: list[bytes] = []
@@ -327,7 +347,10 @@ def extract_docx_paragraph_snapshot(paragraph: ElementTree.Element) -> dict[str,
     paragraph_props = paragraph.find("w:pPr", WORD_NAMESPACE)
     runs: list[dict[str, Any]] = []
     for run in iter_limited(
-        paragraph, "r", max_items=MAX_DOCX_RUNS_PER_PARAGRAPH, label="runs per paragraph"
+        paragraph,
+        "r",
+        max_items=MAX_DOCX_RUNS_PER_PARAGRAPH,
+        label="runs per paragraph",
     ):
         run_snapshot = extract_docx_run_snapshot(run)
         if run_snapshot["text"] or any(
@@ -657,6 +680,11 @@ def build_section(
     """Construct a section model from raw content."""
 
     paragraphs = build_paragraphs(content)
+    is_mermaid_code = is_mermaid_heading(level=level, title=title)
+    if is_mermaid_code:
+        paragraphs = [
+            mark_paragraph_as_mermaid_code(paragraph) for paragraph in paragraphs
+        ]
     sentences = flatten_sentence_text(paragraphs)
     word_count = count_words(content)
     return Section(
@@ -669,6 +697,28 @@ def build_section(
         paragraphs=paragraphs,
         sentences=sentences,
         word_count=word_count,
+        is_mermaid_code=is_mermaid_code,
+    )
+
+
+def is_mermaid_heading(*, level: int, title: str) -> bool:
+    """Return whether a level-2/3 heading itself appears to be Mermaid syntax."""
+
+    return level in {2, 3} and MERMAID_HEADING_PATTERN.search(title) is not None
+
+
+def mark_paragraph_as_mermaid_code(paragraph: Paragraph) -> Paragraph:
+    """Return a paragraph copy marked as Mermaid code."""
+
+    return Paragraph(
+        index=paragraph.index,
+        text=paragraph.text,
+        sentences=[],
+        word_count=paragraph.word_count,
+        is_mermaid_code=True,
+        topic_relevance_score=paragraph.topic_relevance_score,
+        topic_matched_keywords=paragraph.topic_matched_keywords,
+        topic_is_relevant=paragraph.topic_is_relevant,
     )
 
 
@@ -741,7 +791,10 @@ def split_paragraph_parts(text: str) -> list[tuple[str, bool]]:
     parts: list[tuple[str, bool]] = []
     cursor = 0
     for match in MERMAID_FENCE_PATTERN.finditer(text):
-        parts.extend((part, False) for part in split_plain_paragraphs(text[cursor : match.start()]))
+        parts.extend(
+            (part, False)
+            for part in split_plain_paragraphs(text[cursor : match.start()])
+        )
         parts.append((match.group(0), True))
         cursor = match.end()
     parts.extend((part, False) for part in split_plain_paragraphs(text[cursor:]))

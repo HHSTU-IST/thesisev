@@ -41,6 +41,7 @@ class Section:
     paragraphs: list[Paragraph]
     sentences: list[str]
     word_count: int
+    is_mermaid_code: bool = False
     children: list[Section] = field(default_factory=list)
     subtree_word_count: int = 0
     ratio: float = 0.0

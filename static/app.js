@@ -121,7 +121,6 @@ function renderResults() {
   renderTechList(data.technology_stack);
   renderSectionTree(data.document.root_sections);
   renderRubric(data.metadata?.rubric || null);
-  renderFormatRequirements(data.metadata?.format_requirements || null);
 }
 
 function renderStatistics(statistics) {
@@ -385,33 +384,6 @@ function renderRubric(rubric) {
     li.textContent = standards
       ? `${item.criterion}: ${item.score} | ${standards}`
       : `${item.criterion}: ${item.score}`;
-    listNode.appendChild(li);
-  });
-}
-
-function renderFormatRequirements(formatRequirements) {
-  const metaNode = document.getElementById("format-meta");
-  const listNode = document.getElementById("format-list");
-  listNode.innerHTML = "";
-
-  if (
-    !formatRequirements ||
-    !formatRequirements.items ||
-    !formatRequirements.items.length
-  ) {
-    metaNode.textContent = "未上传格式要求";
-    const li = document.createElement("li");
-    li.textContent = "暂无格式要求";
-    listNode.appendChild(li);
-    return;
-  }
-
-  metaNode.textContent =
-    `来源: ${formatRequirements.source_name || "format_requirements.json"} | ` +
-    `条目数: ${formatRequirements.item_count || formatRequirements.items.length}`;
-  formatRequirements.items.forEach((item) => {
-    const li = document.createElement("li");
-    li.textContent = `${item.label}: ${item.value}`;
     listNode.appendChild(li);
   });
 }
