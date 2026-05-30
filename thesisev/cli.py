@@ -123,9 +123,6 @@ def print_report(result) -> None:
     print(
         f"- title_repetition: {'ok' if not result.comment_checks.get('repeats_title') else 'needs review'}"
     )
-    print(
-        f"- score_alignment: {'ok' if result.comment_checks.get('has_score_alignment') else 'needs review'}"
-    )
     print()
     print("Issues:")
     if not result.issues:

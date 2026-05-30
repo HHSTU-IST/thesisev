@@ -578,7 +578,7 @@ def evaluate_document(
         max_tokens=max_tokens,
         timeout=timeout,
     )
-    comment, comment_checks = generate_comment(
+    comment, comment_checks, comment_source = generate_comment(
         title=document.title,
         keywords=keywords,
         technology_details=technology_details,
@@ -604,6 +604,8 @@ def evaluate_document(
         metadata={
             "version": "0.1.0",
             "topic_analysis": topic_analysis,
+            "score_source": "rule_engine",
+            "comment_source": comment_source,
             "model": runtime_model_config.to_metadata(),
         },
     )

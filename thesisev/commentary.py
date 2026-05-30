@@ -21,11 +21,11 @@ def generate_comment(
     issues,
     root_sections,
     model_config: ModelConfig | None = None,
-) -> tuple[str, dict[str, Any]]:
+) -> tuple[str, dict[str, Any], str]:
     """Generate a concise thesis evaluation comment and validation checks."""
 
     focus_keywords = select_comment_keywords(title=title, fallback_keywords=keywords)
-    comment = generate_comment_with_llm(
+    comment, comment_source = generate_comment_with_llm(
         title=title,
         focus_keywords=focus_keywords,
         technology_details=technology_details,
@@ -36,15 +36,11 @@ def generate_comment(
         root_sections=root_sections,
         model_config=model_config,
     )
-    checks = assess_comment(
-        comment=comment, title=title, keywords=focus_keywords, score=score
-    )
+    checks = assess_comment(comment=comment, title=title, keywords=focus_keywords)
     if not checks["passes_keyword_coverage"]:
         comment = reinforce_keyword_coverage(comment, checks["missing_keywords"])
-        checks = assess_comment(
-            comment=comment, title=title, keywords=focus_keywords, score=score
-        )
-    return comment, checks
+        checks = assess_comment(comment=comment, title=title, keywords=focus_keywords)
+    return comment, checks, comment_source
 
 
 def generate_comment_with_llm(
@@ -58,7 +54,7 @@ def generate_comment_with_llm(
     issues,
     root_sections,
     model_config: ModelConfig | None,
-) -> str:
+) -> tuple[str, str]:
     """Generate commentary with an LLM and fall back to rule-based text."""
 
     fallback = build_rule_based_comment(
@@ -72,7 +68,7 @@ def generate_comment_with_llm(
         root_sections=root_sections,
     )
     if model_config is None or not model_config.is_available():
-        return fallback
+        return fallback, "fallback"
 
     prompt = build_comment_prompt(
         title=title,
@@ -80,7 +76,6 @@ def generate_comment_with_llm(
         technology_details=technology_details,
         topic_keywords=topic_keywords,
         topic_relevance_ratio=topic_relevance_ratio,
-        score=score,
         issues=issues,
         root_sections=root_sections,
     )
@@ -92,7 +87,7 @@ def generate_comment_with_llm(
                     content=(
                         "你是一名严谨的中文论文评审助手。"
                         "请根据给定分析结果生成一段 120 到 180 字的论文评价。"
-                        "评价要自然、具体、克制，必须体现评分高低。"
+                        "评价要自然、具体、克制。"
                         "必须包含至少两个关键词，不要直接复述完整论文标题。"
                     )
                 ),
@@ -100,12 +95,12 @@ def generate_comment_with_llm(
             ]
         )
     except Exception:
-        return fallback
+        return fallback, "fallback"
 
     content = extract_response_text(response).strip()
     if not content:
-        return fallback
-    return content.replace(title, "、".join(focus_keywords) or "研究主题")
+        return fallback, "fallback"
+    return content.replace(title, "、".join(focus_keywords) or "研究主题"), "llm"
 
 
 def build_rule_based_comment(
@@ -130,7 +125,7 @@ def build_rule_based_comment(
     focus_text = "、".join(focus_keywords) if focus_keywords else "研究主题"
     comment = (
         f"论文围绕{focus_text}等内容展开，{structure_summary}，整体质量{quality_phrase}。"
-        f"{topic_summary}{technology_summary}{issue_summary}{score_summary}当前评分约为 {score} 分。"
+        f"{topic_summary}{technology_summary}{issue_summary}{score_summary}"
     )
     return comment.replace(title, focus_text)
 
@@ -142,7 +137,6 @@ def build_comment_prompt(
     technology_details,
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    score: int,
     issues,
     root_sections,
 ) -> str:
@@ -179,7 +173,6 @@ def build_comment_prompt(
         f"章节分布：{section_summary}\n"
         f"技术栈：{technology_summary}\n"
         f"问题概览：{issue_summary}\n"
-        f"综合评分：{score} 分\n"
         "请输出一段中文评语，不要分点。"
     )
 
@@ -313,21 +306,19 @@ def summarize_issues(issues) -> str:
 
 
 def summarize_score(score: int) -> str:
-    """Generate a score-consistent closing sentence fragment."""
+    """Generate a score-consistent closing sentence."""
 
     if score >= 90:
-        return "综合来看，该文完成度较高，"
+        return "综合来看，该文完成度较高。"
     if score >= 80:
-        return "综合来看，该文整体表现较为稳健，"
+        return "综合来看，该文整体表现较为稳健。"
     if score >= 70:
-        return "综合来看，该文具有一定完成度，"
-    return "综合来看，该文仍需进一步打磨，"
+        return "综合来看，该文具有一定完成度。"
+    return "综合来看，该文仍需进一步打磨。"
 
 
-def assess_comment(
-    *, comment: str, title: str, keywords: list[str], score: int
-) -> dict[str, Any]:
-    """Validate keyword coverage, title repetition, and score alignment."""
+def assess_comment(*, comment: str, title: str, keywords: list[str]) -> dict[str, Any]:
+    """Validate keyword coverage and title repetition."""
 
     covered_keywords = [
         keyword for keyword in keywords if keyword and keyword in comment
@@ -338,15 +329,11 @@ def assess_comment(
     expected_keyword_count = min(2, len(keywords))
     passes_keyword_coverage = len(covered_keywords) >= expected_keyword_count
     repeats_title = title in comment
-    mentions_score = f"{score} 分" in comment
-    expected_score_summary = summarize_score(score).strip("，")
-    has_score_alignment = expected_score_summary in comment and mentions_score
     return {
         "covered_keywords": covered_keywords,
         "missing_keywords": missing_keywords,
         "passes_keyword_coverage": passes_keyword_coverage,
         "repeats_title": repeats_title,
-        "has_score_alignment": has_score_alignment,
     }
 
 
