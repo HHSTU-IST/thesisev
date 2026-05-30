@@ -2,6 +2,11 @@
 
 轻量论文评审工具。
 
+## 设计理念
+
+- 内容评价与评分：依靠调用大模型API
+- 格式检测与评分：依靠本地程序
+
 ## 主要功能
 
 - 论文结构解析：支持上传 `md` 或 `docx` 论文，解析标题、章节、段落与句子结构。
@@ -90,11 +95,11 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 
 ### 毕业设计
 
-- 理工科：`data/score_thesis_tech.json`
+- 理工科：`config/score_thesis_tech.json`
 
 ### 调研报告
 
-- 物联网：`data/score_report_iot.json`
+- 物联网：`config/score_report_iot.json`
 
 ## 毕业设计评分实现方案
 
@@ -139,14 +144,6 @@ raw_score = sum(item.score for item in criteria)
 raw_total = sum(item.max_score for item in criteria)  # 当前为 60
 score = round(raw_score / raw_total * 100)
 ```
-
-落地状态：
-
-1. 已新增 `ScoreCriterion`、`ScoreReport` 数据结构，并在 `EvaluationResult.metadata` 中返回 `score_detail`。
-2. 已更新 `thesisev/scoring.py`，优先让 LLM 生成六项评分，失败时回退到本地规则。
-3. 已修改 `api.py`：`calculate_score_report()` 继续输出百分制总分，同时保留 `score_detail`。
-4. 已修改 UI：在结果区新增“评分明细”，展示每项得分、扣分原因和证据。
-5. 保持格式检测由本地程序完成，LLM 负责内容评价与六项评分标准。
 
 ## 输出示例
 

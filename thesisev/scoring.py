@@ -34,6 +34,7 @@ class ScoreCriterion:
     score: float
     max_score: float
     standards: list[str] = field(default_factory=list)
+    evaluation: str = ""
     evidence: list[str] = field(default_factory=list)
     deductions: list[str] = field(default_factory=list)
     suggestions: list[str] = field(default_factory=list)
@@ -90,28 +91,12 @@ def calculate_score_report(
     rubric_filename: str = DEFAULT_THESIS_TECH_RUBRIC,
     model_config: ModelConfig | None = None,
 ) -> ScoreReport:
-    """Calculate a rubric-based percentage score from LLM or fallback signals."""
+    """Calculate a rubric-based percentage score from rubric config."""
 
     rubric_items, rubric_source = resolve_rubric_items(
         rubric=rubric, rubric_filename=rubric_filename
     )
-    if model_config is not None and model_config.is_available():
-        try:
-            return calculate_score_report_with_llm(
-                document=document,
-                topic_analysis=topic_analysis,
-                issues=issues,
-                keywords=keywords,
-                technology_details=technology_details,
-                format_requirements=format_requirements,
-                rubric_items=rubric_items,
-                rubric_source=rubric_source,
-                rubric_filename=rubric_source,
-                model_config=model_config,
-            )
-        except Exception:
-            pass
-    return calculate_score_report_local(
+    criteria = score_rubric_items(
         document=document,
         topic_analysis=topic_analysis,
         issues=issues,
@@ -120,6 +105,13 @@ def calculate_score_report(
         format_requirements=format_requirements,
         rubric_items=rubric_items,
         rubric_source=rubric_source,
+        rubric_filename=rubric_filename,
+        model_config=model_config,
+    )
+    return build_score_report(
+        criteria=criteria,
+        rubric_source=rubric_source,
+        score_source=determine_score_source(criteria),
     )
 
 
@@ -214,6 +206,157 @@ def calculate_score_report_local(
     )
 
 
+def score_rubric_items(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_items: list[RubricItem],
+    rubric_source: str,
+    rubric_filename: str,
+    model_config: ModelConfig | None,
+) -> list[ScoreCriterion]:
+    """Score each rubric item according to its configured evaluation method."""
+
+    item_by_name = {item.name: item for item in rubric_items}
+    criteria: list[ScoreCriterion] = []
+    for item in rubric_items:
+        method = item.evaluation.strip().lower()
+        if method == "llm" and model_config is not None and model_config.is_available():
+            criteria.append(
+                score_item_with_llm(
+                    document=document,
+                    topic_analysis=topic_analysis,
+                    issues=issues,
+                    keywords=keywords,
+                    technology_details=technology_details,
+                    format_requirements=format_requirements,
+                    rubric_item=item,
+                    rubric_source=rubric_source,
+                    rubric_filename=rubric_filename,
+                    model_config=model_config,
+                )
+            )
+            continue
+        criteria.append(
+            score_item_locally(
+                document=document,
+                topic_analysis=topic_analysis,
+                issues=issues,
+                keywords=keywords,
+                technology_details=technology_details,
+                format_requirements=format_requirements,
+                rubric_item=item,
+                item_by_name=item_by_name,
+            )
+        )
+    return criteria
+
+
+def score_item_with_llm(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_item: RubricItem,
+    rubric_source: str,
+    rubric_filename: str,
+    model_config: ModelConfig,
+) -> ScoreCriterion:
+    """Score a single rubric item with the LLM."""
+
+    prompt = build_score_prompt(
+        document=document,
+        topic_analysis=topic_analysis,
+        issues=issues,
+        keywords=keywords,
+        technology_details=technology_details,
+        format_requirements=format_requirements,
+        rubric_items=[rubric_item],
+        rubric_filename=rubric_filename,
+    )
+    model = create_chat_model(model_config)
+    response = model.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "你是一名严谨的中文论文评分老师。"
+                    "你只负责单个评分项打分，不负责格式检测。"
+                    "请根据提供的论文信息、本地检测结果和评分标准，给出该项分数。"
+                    "必须只输出纯 JSON，不要 Markdown，不要解释。"
+                )
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
+    payload = parse_llm_json_response(response)
+    criteria = normalize_llm_score_criteria(payload, [rubric_item])
+    criterion = criteria[0]
+    criterion.source = "llm"
+    return criterion
+
+
+def score_item_locally(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_item: RubricItem,
+    item_by_name: dict[str, RubricItem],
+) -> ScoreCriterion:
+    """Score a single rubric item using local heuristics."""
+
+    if rubric_item.name == "选题及工作量":
+        return score_topic_workload(
+            document, topic_analysis, technology_details, rubric_item
+        )
+    if rubric_item.name == "调查论证":
+        return score_research_argument(document, keywords, rubric_item)
+    if rubric_item.name == "译文":
+        return score_translation(document, rubric_item)
+    if rubric_item.name == "实验方案、分析与技能":
+        return score_experiment_analysis(document, technology_details, rubric_item)
+    if rubric_item.name == "论文质量":
+        return score_writing_quality(document, issues, format_requirements, rubric_item)
+    if rubric_item.name == "创新":
+        return score_innovation(document, technology_details, rubric_item)
+    if rubric_item.name == "调研背景与意义":
+        return score_iot_background(document, rubric_item)
+    if rubric_item.name == "调研方法和思路":
+        return score_iot_method(document, rubric_item)
+    if rubric_item.name == "软件选型":
+        return score_iot_software(document, technology_details, rubric_item)
+    if rubric_item.name == "硬件选型":
+        return score_iot_hardware(document, technology_details, rubric_item)
+    if rubric_item.name == "成本核算":
+        return score_iot_cost(document, rubric_item)
+    if rubric_item.name == "未来展望":
+        return score_iot_outlook(document, rubric_item)
+    if rubric_item.name == "总字数":
+        return score_iot_word_count(document, rubric_item)
+    if rubric_item.name == "报告撰写":
+        return score_iot_writing(document, issues, rubric_item)
+    if rubric_item.name == "格式规范":
+        return score_iot_format(document, issues, format_requirements, rubric_item)
+    return build_criterion(
+        key=normalize_criterion_name(rubric_item.name),
+        rubric_item=rubric_item,
+        score=0,
+        evidence=["未实现本地评分逻辑"],
+        deductions=["缺少本地评分映射"],
+        suggestions=["补充该评分项的本地规则"],
+    )
+
+
 def build_score_report(
     *,
     criteria: list[ScoreCriterion],
@@ -233,6 +376,17 @@ def build_score_report(
         rubric_source=rubric_source,
         score_source=score_source,
     )
+
+
+def determine_score_source(criteria: list[ScoreCriterion]) -> str:
+    """Summarize how the final score was produced."""
+
+    sources = {item.source or item.evaluation or "local_program" for item in criteria}
+    if sources == {"llm"}:
+        return "llm"
+    if sources <= {"local", "local_program"}:
+        return "local_program"
+    return "mixed"
 
 
 def build_score_prompt(
@@ -316,6 +470,23 @@ def parse_llm_json_response(response: Any) -> dict[str, Any]:
         return json.loads(text[start : end + 1])
 
 
+def extract_response_text(response: Any) -> str:
+    """Extract text content from a LangChain response object."""
+
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content)
+
+
 def normalize_llm_score_criteria(
     payload: dict[str, Any], rubric_items: list[RubricItem]
 ) -> list[ScoreCriterion]:
@@ -342,6 +513,7 @@ def normalize_llm_score_criteria(
                 score=round(parse_score_value(entry.get("score", 0)), 2),
                 max_score=rubric_item.max_score,
                 standards=rubric_item.standards,
+                evaluation=rubric_item.evaluation,
                 evidence=parse_string_list(entry.get("evidence", [])),
                 deductions=parse_string_list(entry.get("deductions", [])),
                 suggestions=parse_string_list(entry.get("suggestions", [])),
@@ -697,6 +869,201 @@ def score_innovation(
     )
 
 
+def score_iot_background(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
+    """Score IoT report background and significance."""
+
+    text = document.cleaned_text
+    terms = count_terms(text, ("物联网", "图像处理", "AI", "应用", "场景", "意义"))
+    score = rubric_item.max_score * ratio_from_thresholds(
+        terms, ((12, 0.6), (6, 0.42), (2, 0.2))
+    )
+    return build_criterion(
+        key="iot_background",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"相关表述 {terms} 处"],
+        deductions=[] if terms >= 4 else ["背景与意义展开不足"],
+        suggestions=[] if terms >= 4 else ["补充调研背景、行业意义和应用场景"],
+    )
+
+
+def score_iot_method(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
+    """Score IoT report method and thinking."""
+
+    text = document.cleaned_text
+    terms = count_terms(text, ("关键字", "网站", "资料", "方法", "思路", "调研"))
+    score = rubric_item.max_score * ratio_from_thresholds(
+        terms, ((10, 0.6), (5, 0.4), (2, 0.18))
+    )
+    return build_criterion(
+        key="iot_method",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"方法相关表述 {terms} 处"],
+        deductions=[] if terms >= 3 else ["调研方法或思路描述较少"],
+        suggestions=[] if terms >= 3 else ["补充信息来源、检索关键词和调研路径"],
+    )
+
+
+def score_iot_software(
+    document: ThesisDocument,
+    technology_details: list[TechnologyStackItem],
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
+    """Score software selection."""
+
+    text = document.cleaned_text
+    terms = count_terms(text, ("软件", "架构", "平台", "框架", "对比", "理由"))
+    tech_hits = sum(
+        1 for item in technology_details if item.category in {"software", "platform"}
+    )
+    score = rubric_item.max_score * min(
+        1.0,
+        ratio_from_thresholds(terms, ((10, 0.5), (5, 0.35), (2, 0.18)))
+        + ratio_from_thresholds(tech_hits, ((3, 0.4), (1, 0.2))),
+    )
+    return build_criterion(
+        key="iot_software",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"软件选型表述 {terms} 处", f"识别到软件类技术 {tech_hits} 项"],
+        deductions=[] if terms >= 3 else ["软件选型理由不足"],
+        suggestions=[] if terms >= 3 else ["补充方案对比和选择理由"],
+    )
+
+
+def score_iot_hardware(
+    document: ThesisDocument,
+    technology_details: list[TechnologyStackItem],
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
+    """Score hardware selection."""
+
+    text = document.cleaned_text
+    terms = count_terms(
+        text, ("硬件", "设备", "传感器", "主控", "模块", "对比", "理由")
+    )
+    tech_hits = sum(
+        1 for item in technology_details if item.category in {"hardware", "device"}
+    )
+    score = rubric_item.max_score * min(
+        1.0,
+        ratio_from_thresholds(terms, ((10, 0.5), (5, 0.35), (2, 0.18)))
+        + ratio_from_thresholds(tech_hits, ((3, 0.4), (1, 0.2))),
+    )
+    return build_criterion(
+        key="iot_hardware",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"硬件选型表述 {terms} 处", f"识别到硬件类技术 {tech_hits} 项"],
+        deductions=[] if terms >= 3 else ["硬件选型理由不足"],
+        suggestions=[] if terms >= 3 else ["补充硬件对比和选择理由"],
+    )
+
+
+def score_iot_cost(document: ThesisDocument, rubric_item: RubricItem) -> ScoreCriterion:
+    """Score cost accounting."""
+
+    text = document.cleaned_text
+    terms = count_terms(text, ("成本", "核算", "预算", "费用", "单价", "总价"))
+    score = rubric_item.max_score * ratio_from_thresholds(
+        terms, ((8, 0.7), (4, 0.45), (2, 0.2))
+    )
+    return build_criterion(
+        key="iot_cost",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"成本核算表述 {terms} 处"],
+        deductions=[] if terms >= 3 else ["成本核算方法不够充分"],
+        suggestions=[] if terms >= 3 else ["补充成本估算依据和计算过程"],
+    )
+
+
+def score_iot_outlook(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
+    """Score future outlook."""
+
+    text = document.cleaned_text
+    terms = count_terms(text, ("展望", "未来", "发展", "趋势", "行业", "应用"))
+    score = rubric_item.max_score * ratio_from_thresholds(
+        terms, ((8, 0.7), (4, 0.45), (2, 0.2))
+    )
+    return build_criterion(
+        key="iot_outlook",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"展望相关表述 {terms} 处"],
+        deductions=[] if terms >= 3 else ["未来展望偏少"],
+        suggestions=[] if terms >= 3 else ["补充与物联网和图像处理相关的未来方向"],
+    )
+
+
+def score_iot_word_count(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
+    """Score report length."""
+
+    word_count = document.total_word_count
+    score = rubric_item.max_score * ratio_from_thresholds(
+        word_count, ((3500, 0.8), (2500, 0.5), (1500, 0.2))
+    )
+    return build_criterion(
+        key="iot_word_count",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"总字数 {word_count}"],
+        deductions=[] if word_count >= 2500 else ["篇幅不足"],
+        suggestions=[] if word_count >= 2500 else ["补充图表说明和调研内容"],
+    )
+
+
+def score_iot_writing(
+    document: ThesisDocument, issues: list[Issue], rubric_item: RubricItem
+) -> ScoreCriterion:
+    """Score report writing quality."""
+
+    issue_penalty = sum(0.5 if issue.severity == "low" else 1.0 for issue in issues)
+    score = max(
+        0.0, rubric_item.max_score - min(rubric_item.max_score * 0.8, issue_penalty)
+    )
+    return build_criterion(
+        key="iot_writing",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"检测问题 {len(issues)} 项"],
+        deductions=[] if not issues else ["存在格式或表达问题"],
+        suggestions=[] if not issues else ["统一正文表达并修正标点/排版问题"],
+    )
+
+
+def score_iot_format(
+    document: ThesisDocument,
+    issues: list[Issue],
+    format_requirements: dict[str, Any] | None,
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
+    """Score format compliance."""
+
+    format_count = (
+        len(format_requirements.get("items", [])) if format_requirements else 0
+    )
+    penalty = sum(0.4 if issue.category == "标点误用" else 0.2 for issue in issues)
+    score = max(0.0, rubric_item.max_score - min(rubric_item.max_score * 0.8, penalty))
+    return build_criterion(
+        key="iot_format",
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[f"格式要求条目 {format_count}", f"检测问题 {len(issues)} 项"],
+        deductions=[] if not issues else ["格式规范存在偏差"],
+        suggestions=[] if not issues else ["对照上传格式要求逐项复核"],
+    )
+
+
 def resolve_rubric_items(
     *,
     rubric: dict[str, Any] | None,
@@ -785,7 +1152,9 @@ def parse_rubric_value(value: Any) -> dict[str, Any]:
         return {
             "score": parse_score_value(score),
             "standard": parse_standards(standard),
-            "evaluation": str(value.get("evaluation", value.get("评价方法", "llm"))).strip()
+            "evaluation": str(
+                value.get("evaluation", value.get("评价方法", "llm"))
+            ).strip()
             or "llm",
         }
     msg = "score rubric item must be numeric or an object with score"
@@ -839,6 +1208,7 @@ def build_criterion(
         score=round(max(0.0, min(rubric_item.max_score, score)), 2),
         max_score=rubric_item.max_score,
         standards=rubric_item.standards,
+        evaluation=rubric_item.evaluation,
         evidence=evidence,
         deductions=deductions,
         suggestions=suggestions,

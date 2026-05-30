@@ -31,14 +31,16 @@ from thesisev.commentary import generate_comment
 from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
-from thesisev.paths import data_dir, static_dir, templates_dir
+from thesisev.paths import data_dir, project_root, static_dir, templates_dir
 from thesisev.scoring import calculate_score_report
 
 
 class EvaluateRequest(BaseModel):
     """Request body for thesis evaluation."""
 
-    path: str = Field(description="Local path to a md or docx thesis file.")
+    path: str = Field(
+        description="Local path to a md or docx thesis file under the project root."
+    )
     provider: str = Field(default="deepseek", description="LLM provider name.")
     model: str | None = Field(
         default=None, description="Explicit model name for the selected provider."
@@ -54,7 +56,9 @@ class EvaluateRequest(BaseModel):
 class StructureRequest(BaseModel):
     """Request body for structure-only parsing."""
 
-    path: str = Field(description="Local path to a md or docx thesis file.")
+    path: str = Field(
+        description="Local path to a md or docx thesis file under the project root."
+    )
 
 
 class ApiResponse(BaseModel):
@@ -200,7 +204,13 @@ def validate_source_path(path: str) -> Path:
     if not source.is_file():
         msg = f"path is not a file: {source}"
         raise HTTPException(status_code=400, detail=msg)
-    return source
+
+    resolved_source = source.resolve()
+    root = project_root().resolve()
+    if resolved_source != root and root not in resolved_source.parents:
+        msg = "path must be inside the project root"
+        raise HTTPException(status_code=403, detail=msg)
+    return resolved_source
 
 
 def validate_suffix(suffix: str) -> None:
@@ -595,6 +605,13 @@ def evaluate_document(
     keywords = extract_keywords(document)
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
+    runtime_model_config = model_config or build_model_config(
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    )
     score_report = calculate_score_report(
         document=document,
         topic_analysis=topic_analysis,
@@ -606,13 +623,6 @@ def evaluate_document(
         model_config=runtime_model_config,
     )
     score = score_report.score
-    runtime_model_config = model_config or build_model_config(
-        provider=provider,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-    )
     comment, comment_checks, comment_source = generate_comment(
         title=document.title,
         keywords=keywords,

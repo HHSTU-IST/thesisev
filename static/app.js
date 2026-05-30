@@ -130,13 +130,7 @@ function renderResults() {
   const scoreSource = data.metadata?.score_source || "local_program";
   const commentSource = data.metadata?.comment_source || "fallback";
   const roles = data.metadata?.evaluation_roles || {};
-  document.getElementById("model-meta").innerHTML = [
-    `<span class="meta-chip">模型 ${escapeHtml(modelMeta.provider || "-")} / ${escapeHtml(modelMeta.model || "-")}</span>`,
-    `<span class="meta-chip ${modelMeta.available ? "is-ready" : "is-muted"}">Key ${modelMeta.available ? "可用" : "不可用"}</span>`,
-    `<span class="meta-chip is-score">${formatScoreSource(scoreSource)}</span>`,
-    `<span class="meta-chip ${commentSource === "llm" ? "is-llm" : "is-fallback"}">${formatCommentSource(commentSource)}</span>`,
-    `<span class="meta-chip is-score">格式检测与评价: ${formatRoleSource(roles.format_evaluation || "local_program")}</span>`,
-  ].join("");
+  renderModelMeta(modelMeta, scoreSource, commentSource, roles);
 
   renderStatistics(data.statistics);
   renderScoreDetail(data.metadata?.score_detail || null);
@@ -181,10 +175,17 @@ function renderScoreDetail(scoreDetail) {
     const li = document.createElement("li");
     const evidence = (item.evidence || []).join("；") || "暂无证据";
     const deductions = (item.deductions || []).join("；") || "无明显扣分项";
-    li.innerHTML =
-      `<strong>${escapeHtml(item.name)}: ${item.score}/${item.max_score}</strong>` +
-      `<div class="issue-subline">证据：${escapeHtml(evidence)}</div>` +
-      `<div class="issue-subline">扣分：${escapeHtml(deductions)}</div>`;
+    const standards = (item.standards || []).join("；") || "暂无标准说明";
+    const title = document.createElement("strong");
+    title.textContent = `${item.name}: ${item.score}/${item.max_score}`;
+    li.appendChild(title);
+
+    li.appendChild(buildSubline(`标准: ${standards}`));
+    li.appendChild(
+      buildSubline(`方法: ${item.evaluation || item.source || "llm"}`),
+    );
+    li.appendChild(buildSubline(`证据: ${evidence}`));
+    li.appendChild(buildSubline(`扣分: ${deductions}`));
     listNode.appendChild(li);
   });
 }
@@ -237,10 +238,13 @@ function renderIssues(issues) {
     const key = buildIssueKey(issue);
     const li = document.createElement("li");
     li.className = `issue-item${state.activeIssueKey === key ? " active" : ""}`;
-    li.innerHTML =
-      `<strong>[${issue.category}] ${issue.section_identifier} ${issue.section_title}</strong>` +
-      `<div>${issue.message}</div>` +
-      `<div class="issue-subline">建议：${issue.suggestion}</div>`;
+    const title = document.createElement("strong");
+    title.textContent = `[${issue.category}] ${issue.section_identifier} ${issue.section_title}`;
+    li.appendChild(title);
+    const message = document.createElement("div");
+    message.textContent = issue.message;
+    li.appendChild(message);
+    li.appendChild(buildSubline(`建议: ${issue.suggestion}`));
     li.addEventListener("click", () => {
       state.activeIssueKey = key;
       state.activeSectionId = issue.section_identifier;
@@ -282,11 +286,23 @@ function buildSectionNode(section) {
   button.className = `tree-button${
     state.activeSectionId === section.identifier ? " active" : ""
   }`;
-  button.innerHTML =
-    `<div class="tree-header"><strong>${section.identifier} ${section.title}</strong>` +
-    `<span>${(section.ratio * 100).toFixed(1)}% / ${section.word_count} 字</span></div>` +
-    `<div class="tree-meta">层级 L${section.level} · 段落 ${section.paragraphs.length} · ` +
-    `主题相关 ${(section.topic_relevance_score * 100).toFixed(1)}%</div>`;
+  const header = document.createElement("div");
+  header.className = "tree-header";
+  const title = document.createElement("strong");
+  title.textContent = `${section.identifier} ${section.title}`;
+  const summary = document.createElement("span");
+  summary.textContent = `${(section.ratio * 100).toFixed(1)}% / ${section.word_count} 字`;
+  header.appendChild(title);
+  header.appendChild(summary);
+
+  const meta = document.createElement("div");
+  meta.className = "tree-meta";
+  meta.textContent =
+    `层级 L${section.level} · 段落 ${section.paragraphs.length} · ` +
+    `主题相关 ${(section.topic_relevance_score * 100).toFixed(1)}%`;
+
+  button.appendChild(header);
+  button.appendChild(meta);
   button.addEventListener("click", () => {
     state.activeSectionId = section.identifier;
     state.activeIssueKey = null;
@@ -327,11 +343,18 @@ function renderHistory(items) {
   }
   items.forEach((item) => {
     const li = document.createElement("li");
-    li.innerHTML =
-      `<strong>${item.title}</strong>` +
-      `<div class="history-subline">${item.created_at} · ${item.source_type} · ${item.score} 分 · ` +
-      `${Math.round((item.topic_relevance_ratio || 0) * 100)}% 主题相关</div>` +
-      `<div class="history-subline">${item.comment}</div>`;
+    const title = document.createElement("strong");
+    title.textContent = item.title;
+    li.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "history-subline";
+    meta.textContent =
+      `${item.created_at} · ${item.source_type} · ${item.score} 分 · ` +
+      `${Math.round((item.topic_relevance_ratio || 0) * 100)}% 主题相关`;
+    li.appendChild(meta);
+
+    li.appendChild(buildSubline(item.comment, "history-subline"));
     node.appendChild(li);
   });
 }
@@ -416,6 +439,52 @@ function renderFormatRequirements(formatRequirements) {
     li.textContent = `${item.label}: ${item.value}`;
     listNode.appendChild(li);
   });
+}
+
+function renderModelMeta(modelMeta, scoreSource, commentSource, roles) {
+  const node = document.getElementById("model-meta");
+  node.replaceChildren();
+
+  node.appendChild(
+    buildMetaChip(
+      `模型 ${modelMeta.provider || "-"} / ${modelMeta.model || "-"}`,
+    ),
+  );
+  node.appendChild(
+    buildMetaChip(
+      `Key ${modelMeta.available ? "可用" : "不可用"}`,
+      modelMeta.available ? "is-ready" : "is-muted",
+    ),
+  );
+  node.appendChild(
+    buildMetaChip(formatScoreSource(scoreSource), "is-score"),
+  );
+  node.appendChild(
+    buildMetaChip(
+      formatCommentSource(commentSource),
+      commentSource === "llm" ? "is-llm" : "is-fallback",
+    ),
+  );
+  node.appendChild(
+    buildMetaChip(
+      `格式检测与评价: ${formatRoleSource(roles.format_evaluation || "local_program")}`,
+      "is-score",
+    ),
+  );
+}
+
+function buildMetaChip(text, className = "") {
+  const chip = document.createElement("span");
+  chip.className = `meta-chip${className ? ` ${className}` : ""}`;
+  chip.textContent = text;
+  return chip;
+}
+
+function buildSubline(text, className = "issue-subline") {
+  const node = document.createElement("div");
+  node.className = className;
+  node.textContent = text;
+  return node;
 }
 
 function exportResult(format) {
@@ -584,13 +653,6 @@ function formatRoleSource(source) {
     return "本地回退";
   }
   return source || "-";
-}
-
-function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
 }
 
 function setLoading(loading, message) {
