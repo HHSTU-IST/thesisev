@@ -39,7 +39,6 @@
             <option value="deepseek">deepseek</option>
             <option value="openai">openai</option>
             <option value="anthropic">anthropic</option>
-            <option value="google_genai">google_genai</option>
           </select>
         </label>
 
@@ -70,13 +69,17 @@
       </form>
     </section>
 
-    <section class="panel history-panel">
+    <details class="panel history-panel">
+      <summary class="history-summary">
+        <span>最近评审</span>
+        <span class="history-summary-hint">展开查看历史记录</span>
+      </summary>
       <div class="history-header">
-        <h2>最近评审</h2>
+        <p class="history-note">本机最近评审记录，仅展示标题、分数和简短评语。</p>
         <button id="refresh-history" type="button" class="ghost-button">刷新</button>
       </div>
       <ul id="history-list" class="list"></ul>
-    </section>
+    </details>
 
     <section id="results" class="results hidden">
       <article class="panel result-card">
@@ -149,7 +152,7 @@
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=20260530-issue-excerpts"></script>
 </body>
 
 </html>

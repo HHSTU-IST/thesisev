@@ -150,6 +150,8 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
     issues: list[Issue] = []
     for section in document.sections:
         for paragraph in section.paragraphs:
+            if paragraph.is_mermaid_code:
+                continue
             for sentence in paragraph.sentences:
                 sentence_text = sentence.text
                 has_chinese = bool(re.search(r"[\u4e00-\u9fff]", sentence_text))
@@ -212,6 +214,8 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
     issues: list[Issue] = []
     for section in document.sections:
         for paragraph in section.paragraphs:
+            if paragraph.is_mermaid_code:
+                continue
             for sentence in paragraph.sentences:
                 for phrase, rule in COLLOQUIAL.items():
                     if phrase not in sentence.text:

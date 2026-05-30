@@ -88,7 +88,6 @@ def default_model_for_provider(provider: str) -> str:
         "deepseek": "deepseek-chat",
         "openai": "gpt-4o-mini",
         "anthropic": "claude-3-5-haiku-latest",
-        "google_genai": "gemini-2.5-flash",
     }.get(provider, provider)
 
 

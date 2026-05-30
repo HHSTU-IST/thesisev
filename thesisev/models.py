@@ -22,6 +22,7 @@ class Paragraph:
     text: str
     sentences: list[Sentence]
     word_count: int
+    is_mermaid_code: bool = False
     topic_relevance_score: float = 0.0
     topic_matched_keywords: list[str] = field(default_factory=list)
     topic_is_relevant: bool = False

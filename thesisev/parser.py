@@ -25,6 +25,9 @@ SECTION_PATTERN = re.compile(
 )
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
+MERMAID_FENCE_PATTERN = re.compile(
+    r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$"
+)
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DOCX_DOCUMENT_XML = "word/document.xml"
 MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
@@ -712,20 +715,43 @@ def build_paragraphs(text: str) -> list[Paragraph]:
     """Split text into non-empty paragraphs with sentence objects."""
 
     paragraphs: list[Paragraph] = []
-    for index, part in enumerate(re.split(r"\n\s*\n", text), start=1):
+    parts = split_paragraph_parts(text)
+    for index, (part, is_mermaid_code) in enumerate(parts, start=1):
         paragraph_text = part.strip()
         if not paragraph_text:
             continue
-        sentence_objects = build_sentence_objects(paragraph_text)
+        sentence_objects = (
+            [] if is_mermaid_code else build_sentence_objects(paragraph_text)
+        )
         paragraphs.append(
             Paragraph(
                 index=index,
                 text=paragraph_text,
                 sentences=sentence_objects,
                 word_count=count_words(paragraph_text),
+                is_mermaid_code=is_mermaid_code,
             )
         )
     return paragraphs
+
+
+def split_paragraph_parts(text: str) -> list[tuple[str, bool]]:
+    """Split text into paragraphs while preserving Mermaid fenced code blocks."""
+
+    parts: list[tuple[str, bool]] = []
+    cursor = 0
+    for match in MERMAID_FENCE_PATTERN.finditer(text):
+        parts.extend((part, False) for part in split_plain_paragraphs(text[cursor : match.start()]))
+        parts.append((match.group(0), True))
+        cursor = match.end()
+    parts.extend((part, False) for part in split_plain_paragraphs(text[cursor:]))
+    return parts
+
+
+def split_plain_paragraphs(text: str) -> list[str]:
+    """Split non-code text into paragraph strings."""
+
+    return [part for part in re.split(r"\n\s*\n", text) if part.strip()]
 
 
 def build_sentence_objects(text: str) -> list[Sentence]:

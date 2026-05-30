@@ -67,16 +67,67 @@ body {
   padding: 22px;
 }
 
+.history-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 800;
+  list-style: none;
+}
+
+.history-summary::-webkit-details-marker {
+  display: none;
+}
+
+.history-summary::after {
+  content: "⌄";
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 18px;
+  transition: transform 0.2s ease;
+}
+
+.history-panel[open] .history-summary::after {
+  transform: rotate(180deg);
+}
+
+.history-summary-hint {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.history-panel[open] .history-summary-hint {
+  font-size: 0;
+}
+
+.history-panel[open] .history-summary-hint::before {
+  content: "收起历史记录";
+  font-size: 14px;
+}
+
 .history-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin: 18px 0 12px;
 }
 
-.history-header h2 {
+.history-note {
   margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .form-grid {
@@ -328,6 +379,23 @@ button:disabled {
   margin-top: 6px;
   color: var(--muted);
   font-size: 14px;
+}
+
+.issue-excerpt {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(180, 83, 9, 0.42);
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  color: #6b3f13;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.issue-match {
+  margin-top: 4px;
+  color: #92400e;
+  font-weight: 700;
 }
 
 .history-subline {

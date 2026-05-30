@@ -1,8 +1,7 @@
 const providerDefaults = {
   deepseek: "deepseek-chat",
   openai: "gpt-4o-mini",
-  anthropic: "claude-3-5-haiku-latest",
-  google_genai: "gemini-2.5-flash",
+  anthropic: "claude-3-5-haiku-latest"
 };
 
 const state = {
@@ -184,9 +183,8 @@ function renderIssueFilters(issues) {
   Object.entries(counts).forEach(([key, value]) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `filter-chip${
-      state.activeIssueFilter === key ? " active" : ""
-    }`;
+    button.className = `filter-chip${state.activeIssueFilter === key ? " active" : ""
+      }`;
     button.textContent = key === "all" ? `全部 ${value}` : `${key} ${value}`;
     button.addEventListener("click", () => {
       state.activeIssueFilter = key;
@@ -223,6 +221,7 @@ function renderIssues(issues) {
     const message = document.createElement("div");
     message.textContent = issue.message;
     li.appendChild(message);
+    li.appendChild(buildIssueExcerpt(issue));
     li.appendChild(buildSubline(`建议: ${issue.suggestion}`));
     li.addEventListener("click", () => {
       state.activeIssueKey = key;
@@ -232,6 +231,34 @@ function renderIssues(issues) {
     });
     node.appendChild(li);
   });
+}
+
+function buildIssueExcerpt(issue) {
+  const node = document.createElement("div");
+  node.className = "issue-excerpt";
+
+  const excerpt = document.createElement("div");
+  excerpt.textContent = `所在片段: ${issue.excerpt || "未提供片段"}`;
+  node.appendChild(excerpt);
+
+  if (issue.matched_text) {
+    const matched = document.createElement("div");
+    matched.className = "issue-match";
+    matched.textContent = `命中内容: ${issue.matched_text}`;
+    node.appendChild(matched);
+  }
+
+  return node;
+}
+
+function buildIssueKey(issue) {
+  return [
+    issue.category || "",
+    issue.section_identifier || "",
+    issue.section_title || "",
+    issue.message || "",
+    issue.suggestion || "",
+  ].join("::");
 }
 
 function renderTechList(technologyStack) {
@@ -262,9 +289,8 @@ function buildSectionNode(section) {
 
   const button = document.createElement("button");
   button.type = "button";
-  button.className = `tree-button${
-    state.activeSectionId === section.identifier ? " active" : ""
-  }`;
+  button.className = `tree-button${state.activeSectionId === section.identifier ? " active" : ""
+    }`;
   const header = document.createElement("div");
   header.className = "tree-header";
   const title = document.createElement("strong");
@@ -454,11 +480,18 @@ function buildMarkdown(data) {
     .join("\n");
   const issues = data.issues.length
     ? data.issues
-        .map(
-          (issue) =>
-            `- [${issue.category}] ${issue.section_identifier} ${issue.section_title}: ${issue.message} 建议：${issue.suggestion}`,
-        )
-        .join("\n")
+      .map(
+        (issue) =>
+          [
+            `- [${issue.category}] ${issue.section_identifier} ${issue.section_title}: ${issue.message}`,
+            `  - 所在片段：${issue.excerpt || "未提供片段"}`,
+            issue.matched_text ? `  - 命中内容：${issue.matched_text}` : "",
+            `  - 建议：${issue.suggestion}`,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+      )
+      .join("\n")
     : "- 未检测到明显问题";
   const tech = data.technology_stack.length
     ? data.technology_stack.map((item) => `- ${item}`).join("\n")
