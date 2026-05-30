@@ -33,11 +33,14 @@ __pycache__
 
 *.docx
 
+# Extras
 articles
 examples
+tests
+
 test.*
 
+data/uploads/
 data/history.json
 data/last_upload.json
-data/uploads/
 

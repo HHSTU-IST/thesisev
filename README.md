@@ -86,7 +86,10 @@ open http://127.0.0.1:8000
 ## 毕业设计评分实现方案
 
 - `analyzers.py` 继续负责提取结构、关键词、问题、主题相关度等信号
-- `scoring.py` 负责把这些信号整理给 LLM 生成 6 项标准分，失败时回退到本地规则。
+- `scoring.py` 负责评分编排、LLM 调用、rubric 解析和结果汇总。
+- `scoring_content.py` 负责毕业设计六项内容评分的本地规则。
+- `scoring_format.py` 负责格式规范读取、DOCX 期望值检查和格式扣分。
+- `scoring_iot.py` 负责物联网调研报告 `report_iot` 的本地评分规则，避免专用规则继续堆在通用评分模块中。
 
 输出结构建议：
 
@@ -203,6 +206,7 @@ curl http://127.0.0.1:8000/history
 - 最近评审会写入本地 `data/history.json`
 - 现在只支持上传 `md` 或 `docx` 文件评审
 - 每次通过 Web UI 或 `/evaluate/upload` 评审都必须显式上传论文文件；系统不会复用、展示或缓存全局最近上传内容
+- Web UI 展示上传文档、问题项和 LLM 评价时使用 `textContent` / DOM 节点构造；`innerHTML` 仅用于清空容器
 
 ## 目录说明
 
