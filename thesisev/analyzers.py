@@ -149,10 +149,10 @@ def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:
 
     issues: list[Issue] = []
     for section in document.sections:
-        if section.is_mermaid_code:
+        if section.skip_format_check:
             continue
         for paragraph in section.paragraphs:
-            if paragraph.is_mermaid_code:
+            if paragraph.skip_format_check:
                 continue
             for sentence in paragraph.sentences:
                 sentence_text = sentence.text
@@ -215,10 +215,10 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
 
     issues: list[Issue] = []
     for section in document.sections:
-        if section.is_mermaid_code:
+        if section.skip_format_check:
             continue
         for paragraph in section.paragraphs:
-            if paragraph.is_mermaid_code:
+            if paragraph.skip_format_check:
                 continue
             for sentence in paragraph.sentences:
                 for phrase, rule in COLLOQUIAL.items():

@@ -498,6 +498,8 @@ def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
         item["standard"] = parse_rubric_standard(
             value.get("standard", value.get("standards", value.get("标准", [])))
         )
+        if value.get("evaluation"):
+            item["evaluation"] = str(value["evaluation"]).strip().lower()
         return item
     item["score"] = parse_rubric_score(value)
     item["standard"] = []

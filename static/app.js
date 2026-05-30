@@ -158,9 +158,7 @@ function renderScoreDetail(scoreDetail) {
     li.appendChild(title);
 
     li.appendChild(buildSubline(`标准: ${standards}`));
-    li.appendChild(
-      buildSubline(`方法: ${item.evaluation || item.source || "llm"}`),
-    );
+    li.appendChild(buildSubline(`方法: ${formatEvaluationMethod(item)}`));
     li.appendChild(buildSubline(`证据: ${evidence}`));
     li.appendChild(buildSubline(`扣分: ${deductions}`));
     listNode.appendChild(li);
@@ -540,6 +538,7 @@ function buildScoreDetailMarkdown(scoreDetail) {
       const suggestions = (item.suggestions || []).join("；") || "暂无建议";
       return [
         `- ${item.name}: ${item.score}/${item.max_score}`,
+        `  - 方法: ${formatEvaluationMethod(item)}`,
         `  - 证据: ${evidence}`,
         `  - 扣分: ${deductions}`,
         `  - 建议: ${suggestions}`,
@@ -607,6 +606,20 @@ function formatRoleSource(source) {
     return "本地回退";
   }
   return source || "-";
+}
+
+function formatEvaluationMethod(item) {
+  const method = item.evaluation || item.source || "llm";
+  if (method === "llm") {
+    return "LLM";
+  }
+  if (method === "local_program") {
+    return "本地程序";
+  }
+  if (method === "llm_fallback_local") {
+    return "LLM 回退本地";
+  }
+  return method;
 }
 
 function setLoading(loading, message) {

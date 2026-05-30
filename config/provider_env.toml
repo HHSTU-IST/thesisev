@@ -1,10 +1,10 @@
 [providers.deepseek]
-api_key_env = "sk-ef1c91b83cf347a186ab8518ad488223"
-base_url_env = "https://api.deepseek.com"
+api_key = "sk-ef1c91b83cf347a186ab8518ad488223"
+base_url = "https://api.deepseek.com"
 
 [providers.openai]
-api_key_env = "OPENAI_API_KEY"
-base_url_env = "https://api.openai.com/v1/chat"
+api_key = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1/chat"
 
 [providers.anthropic]
-api_key_env = "ANTHROPIC_API_KEY"
+api_key = "ANTHROPIC_API_KEY"

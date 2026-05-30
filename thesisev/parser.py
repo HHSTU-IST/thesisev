@@ -42,6 +42,9 @@ MERMAID_HEADING_PATTERN = re.compile(
     r"|timeline"
     r")\b"
 )
+REFERENCE_HEADING_PATTERN = re.compile(
+    r"(?i)^(?:references?|bibliography|参考文献|文献|参考资料|参考书目)$"
+)
 WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 DOCX_DOCUMENT_XML = "word/document.xml"
 MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
@@ -647,6 +650,9 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
     if markdown_match is not None:
         line = markdown_match.group(1).strip()
 
+    if is_reference_heading(line):
+        return 1, line, line, line
+
     match = SECTION_PATTERN.match(line)
     if match is not None:
         numbering = match.group("prefix").strip()
@@ -681,9 +687,14 @@ def build_section(
 
     paragraphs = build_paragraphs(content)
     is_mermaid_code = is_mermaid_heading(level=level, title=title)
-    if is_mermaid_code:
+    skip_format_check = is_mermaid_code or is_reference_heading(title)
+    if skip_format_check:
         paragraphs = [
-            mark_paragraph_as_mermaid_code(paragraph) for paragraph in paragraphs
+            mark_paragraph_skip_format_check(
+                paragraph,
+                is_mermaid_code=is_mermaid_code,
+            )
+            for paragraph in paragraphs
         ]
     sentences = flatten_sentence_text(paragraphs)
     word_count = count_words(content)
@@ -698,6 +709,7 @@ def build_section(
         sentences=sentences,
         word_count=word_count,
         is_mermaid_code=is_mermaid_code,
+        skip_format_check=skip_format_check,
     )
 
 
@@ -707,15 +719,24 @@ def is_mermaid_heading(*, level: int, title: str) -> bool:
     return level in {2, 3} and MERMAID_HEADING_PATTERN.search(title) is not None
 
 
-def mark_paragraph_as_mermaid_code(paragraph: Paragraph) -> Paragraph:
-    """Return a paragraph copy marked as Mermaid code."""
+def is_reference_heading(title: str) -> bool:
+    """Return whether a heading is a references section."""
+
+    return REFERENCE_HEADING_PATTERN.fullmatch(title.strip()) is not None
+
+
+def mark_paragraph_skip_format_check(
+    paragraph: Paragraph, *, is_mermaid_code: bool
+) -> Paragraph:
+    """Return a paragraph copy marked to skip prose format checks."""
 
     return Paragraph(
         index=paragraph.index,
         text=paragraph.text,
         sentences=[],
         word_count=paragraph.word_count,
-        is_mermaid_code=True,
+        is_mermaid_code=is_mermaid_code,
+        skip_format_check=True,
         topic_relevance_score=paragraph.topic_relevance_score,
         topic_matched_keywords=paragraph.topic_matched_keywords,
         topic_is_relevant=paragraph.topic_is_relevant,

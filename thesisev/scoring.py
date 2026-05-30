@@ -242,18 +242,31 @@ def score_rubric_items(
             )
             continue
         criteria.append(
-            score_item_locally(
-                document=document,
-                topic_analysis=topic_analysis,
-                issues=issues,
-                keywords=keywords,
-                technology_details=technology_details,
-                format_requirements=format_requirements,
-                rubric_item=item,
-                item_by_name=item_by_name,
+            mark_llm_fallback_if_needed(
+                score_item_locally(
+                    document=document,
+                    topic_analysis=topic_analysis,
+                    issues=issues,
+                    keywords=keywords,
+                    technology_details=technology_details,
+                    format_requirements=format_requirements,
+                    rubric_item=item,
+                    item_by_name=item_by_name,
+                ),
+                requested_method=method,
             )
         )
     return criteria
+
+
+def mark_llm_fallback_if_needed(
+    criterion: ScoreCriterion, *, requested_method: str
+) -> ScoreCriterion:
+    """Preserve method transparency when an LLM-configured item falls back locally."""
+
+    if requested_method == "llm" and criterion.evaluation == "local_program":
+        criterion.evaluation = "llm_fallback_local"
+    return criterion
 
 
 def score_item_with_llm(
@@ -297,9 +310,7 @@ def score_item_with_llm(
     )
     payload = parse_llm_json_response(response)
     criteria = normalize_llm_score_criteria(payload, [rubric_item])
-    criterion = criteria[0]
-    criterion.source = "llm"
-    return criterion
+    return criteria[0]
 
 
 def score_item_locally(
@@ -441,7 +452,8 @@ def build_score_prompt(
         "2. score 为百分制总分，raw_score 为六项原始分总和，raw_total 为六项满分总和。\n"
         "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
         "4. 评分必须参考评分标准，但分数由你综合判断。\n"
-        "5. 证据、扣分原因、建议都要简洁具体。\n"
+        "5. 证据、扣分原因、建议都要简洁具体；"
+        "任何低于满分的评分项，deductions 必须给出具体扣分理由，不能留空。\n"
         f"论文信息：{json.dumps(payload, ensure_ascii=False)}"
     )
 
@@ -500,6 +512,12 @@ def normalize_llm_score_criteria(
         rubric_item = rubric_by_name[name]
         score = round(parse_score_value(entry.get("score", 0)), 2)
         deductions = parse_string_list(entry.get("deductions", []))
+        validate_llm_deductions(
+            criterion_name=rubric_item.name,
+            score=score,
+            max_score=rubric_item.max_score,
+            deductions=deductions,
+        )
         criteria.append(
             ScoreCriterion(
                 key=str(entry.get("key") or item_by_key[name]),
@@ -507,13 +525,9 @@ def normalize_llm_score_criteria(
                 score=score,
                 max_score=rubric_item.max_score,
                 standards=rubric_item.standards,
-                evaluation=rubric_item.evaluation,
+                evaluation="llm",
                 evidence=parse_string_list(entry.get("evidence", [])),
-                deductions=ensure_deduction_visibility(
-                    score=score,
-                    max_score=rubric_item.max_score,
-                    deductions=deductions,
-                ),
+                deductions=deductions,
                 suggestions=parse_string_list(entry.get("suggestions", [])),
             )
         )
@@ -530,6 +544,20 @@ def parse_string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
     return [str(value).strip()] if str(value).strip() else []
+
+
+def validate_llm_deductions(
+    *,
+    criterion_name: str,
+    score: float,
+    max_score: float,
+    deductions: list[str],
+) -> None:
+    """Require LLM scoring to explain every non-full score."""
+
+    if score < max_score and not deductions:
+        msg = f"llm score criterion {criterion_name} is below max but deductions are empty"
+        raise ValueError(msg)
 
 
 def deduplicate_preserving_order(values: list[str]) -> list[str]:
@@ -1020,7 +1048,7 @@ def ensure_deduction_visibility(
     if deductions or score >= max_score:
         return deductions
     lost_points = round(max_score - score, 2)
-    return [f"未达到满分，扣 {lost_points:g} 分；请结合评分标准和证据项复核"]
+    return [f"未达到满分，扣 {lost_points:g} 分"]
 
 
 def ratio_from_thresholds(

@@ -5,48 +5,55 @@
             "AI发展对物联网领域的冲击",
             "相关岗位需要掌握的技术"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "调研方法和思路": {
         "standard": [
             "使用AI收集信息时，重点使用的关键字",
             "调研查阅的网站"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "软件选型": {
         "standard": [
             "现有主流软件架构的对比",
             "选择某一软件架构的理由"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "硬件选型": {
         "standard": [
             "现有主流硬件的对比",
             "选择某一硬件的理由"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "成本核算": {
         "standard": [
             "阐述产品规划",
             "成本核算方法科学合理"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "未来展望": {
         "standard": [
             "与物联网行业相关",
             "与图像处理技术相关"
         ],
-        "score": 10
+        "score": 10,
+        "evaluation": "llm"
     },
     "报告撰写": {
         "standard": [
             "逻辑连贯",
             "图文并茂"
         ],
-        "score": 20
+        "score": 20,
+        "evaluation": "llm"
     }
 }
