@@ -14,7 +14,7 @@
       <p class="eyebrow">THESISEV</p>
       <h1>论文评价工作台</h1>
       <p class="lead">
-        上传论文，选择大模型，快速得到结构分析、问题清单和总评语。
+        上传论文，选择大模型，快速得到结构分析、本地格式检测和内容评价。
       </p>
     </section>
 
@@ -84,10 +84,10 @@
     <section id="results" class="results hidden">
       <article class="panel result-card">
         <div class="result-header">
-          <h2>总评语</h2>
+          <h2>内容评价</h2>
           <div class="result-actions">
             <span id="score-badge" class="score-badge">--</span>
-            <button id="export-md" type="button" class="ghost-button">评语导出 .md</button>
+            <button id="export-md" type="button" class="ghost-button">评价导出 .md</button>
           </div>
         </div>
         <p id="comment" class="comment"></p>
@@ -122,7 +122,13 @@
       </article>
 
       <article class="panel result-card">
-        <h2>识别问题</h2>
+        <h2>评分明细</h2>
+        <div id="score-detail-meta" class="meta-line"></div>
+        <ul id="score-detail-list" class="list"></ul>
+      </article>
+
+      <article class="panel result-card">
+        <h2>格式检测</h2>
         <div id="issue-filters" class="filter-row"></div>
         <ul id="issues-list" class="list"></ul>
       </article>

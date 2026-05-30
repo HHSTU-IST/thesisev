@@ -22,7 +22,6 @@ from thesisev.analyzers import (
     annotate_section_statistics,
     annotate_topic_relevance,
     build_statistics,
-    calculate_score,
     detect_issues,
     extract_keywords,
     extract_technology_details,
@@ -33,6 +32,7 @@ from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
 from thesisev.paths import data_dir, static_dir, templates_dir
+from thesisev.scoring import calculate_score_report
 
 
 class EvaluateRequest(BaseModel):
@@ -165,17 +165,20 @@ async def evaluate_upload(
     """Evaluate an uploaded thesis file."""
 
     try:
+        source = await resolve_thesis_source(file)
+        rubric_summary = await resolve_rubric_summary(rubric_file)
+        format_summary = await resolve_format_requirements_summary(format_file)
         result = evaluate_document(
-            await resolve_thesis_source(file),
+            source,
             provider=provider,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+            rubric=rubric_summary,
+            format_requirements=format_summary,
         )
-        rubric_summary = await resolve_rubric_summary(rubric_file)
         if rubric_summary is not None:
             result.metadata["rubric"] = rubric_summary
-        format_summary = await resolve_format_requirements_summary(format_file)
         if format_summary is not None:
             result.metadata["format_requirements"] = format_summary
         result.metadata["last_upload"] = build_public_last_upload_manifest()
@@ -426,11 +429,8 @@ def normalize_rubric_payload(payload: Any) -> list[dict[str, Any]]:
 
     if isinstance(payload, dict):
         return [
-            {
-                "criterion": parse_rubric_criterion(criterion),
-                "score": parse_rubric_score(score),
-            }
-            for criterion, score in payload.items()
+            parse_rubric_item(criterion=criterion, value=value)
+            for criterion, value in payload.items()
         ]
 
     if isinstance(payload, list):
@@ -439,17 +439,27 @@ def normalize_rubric_payload(payload: Any) -> list[dict[str, Any]]:
             if not isinstance(entry, dict) or len(entry) != 1:
                 msg = "rubric list entries must be single-key objects"
                 raise ValueError(msg)
-            criterion, score = next(iter(entry.items()))
-            items.append(
-                {
-                    "criterion": parse_rubric_criterion(criterion),
-                    "score": parse_rubric_score(score),
-                }
-            )
+            criterion, value = next(iter(entry.items()))
+            items.append(parse_rubric_item(criterion=criterion, value=value))
         return items
 
     msg = "rubric JSON must be an object or a list of single-key objects"
     raise ValueError(msg)
+
+
+def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
+    """Parse one rubric item from flat or nested JSON shapes."""
+
+    item = {"criterion": parse_rubric_criterion(criterion)}
+    if isinstance(value, dict):
+        item["score"] = parse_rubric_score(value.get("score", value.get("分数")))
+        item["standard"] = parse_rubric_standard(
+            value.get("standard", value.get("standards", value.get("标准", [])))
+        )
+        return item
+    item["score"] = parse_rubric_score(value)
+    item["standard"] = []
+    return item
 
 
 def normalize_format_requirements_payload(payload: Any) -> list[dict[str, str]]:
@@ -506,6 +516,19 @@ def parse_rubric_score(score: Any) -> float:
     raise ValueError(msg)
 
 
+def parse_rubric_standard(standard: Any) -> list[str]:
+    """Parse rubric standard descriptions into a text list."""
+
+    if standard in (None, ""):
+        return []
+    if isinstance(standard, str):
+        stripped = standard.strip()
+        return [stripped] if stripped else []
+    if isinstance(standard, list):
+        return [str(item).strip() for item in standard if str(item).strip()]
+    return [str(standard).strip()] if str(standard).strip() else []
+
+
 def parse_rubric_criterion(criterion: Any) -> str:
     """Parse a rubric criterion as non-empty text."""
 
@@ -559,6 +582,8 @@ def evaluate_document(
     max_tokens: int = 400,
     timeout: int = 60,
     model_config: ModelConfig | None = None,
+    rubric: dict[str, Any] | None = None,
+    format_requirements: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     """Evaluate a thesis document from a local path."""
 
@@ -570,7 +595,16 @@ def evaluate_document(
     keywords = extract_keywords(document)
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
-    score = calculate_score(issues, len(document.sections))
+    score_report = calculate_score_report(
+        document=document,
+        topic_analysis=topic_analysis,
+        issues=issues,
+        keywords=keywords,
+        technology_details=technology_details,
+        format_requirements=format_requirements,
+        rubric=rubric,
+    )
+    score = score_report.score
     runtime_model_config = model_config or build_model_config(
         provider=provider,
         model=model,
@@ -584,8 +618,6 @@ def evaluate_document(
         technology_details=technology_details,
         topic_keywords=topic_analysis["topic_keywords"],
         topic_relevance_ratio=topic_analysis["document_ratio"],
-        score=score,
-        issues=issues,
         root_sections=document.root_sections,
         model_config=runtime_model_config,
     )
@@ -604,8 +636,14 @@ def evaluate_document(
         metadata={
             "version": "0.1.0",
             "topic_analysis": topic_analysis,
-            "score_source": "rule_engine",
+            "score_source": "local_program",
+            "score_detail": score_report.to_dict(),
             "comment_source": comment_source,
+            "evaluation_roles": {
+                "format_detection": "local_program",
+                "format_evaluation": "local_program",
+                "content_evaluation": comment_source,
+            },
             "model": runtime_model_config.to_metadata(),
         },
     )

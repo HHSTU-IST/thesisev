@@ -115,7 +115,7 @@ function renderResults() {
   }
 
   resultsNode.classList.remove("hidden");
-  document.getElementById("comment").textContent = data.comment || "暂无评语";
+  document.getElementById("comment").textContent = data.comment || "暂无内容评价";
   document.getElementById("score-badge").textContent = `${data.score} 分`;
   document.getElementById("doc-title").textContent = data.document.title;
   document.getElementById("doc-type").textContent = data.document.source_type;
@@ -127,16 +127,19 @@ function renderResults() {
   ).toFixed(1)}%`;
 
   const modelMeta = data.metadata?.model || {};
-  const scoreSource = data.metadata?.score_source || "rule_engine";
+  const scoreSource = data.metadata?.score_source || "local_program";
   const commentSource = data.metadata?.comment_source || "fallback";
+  const roles = data.metadata?.evaluation_roles || {};
   document.getElementById("model-meta").innerHTML = [
     `<span class="meta-chip">模型 ${escapeHtml(modelMeta.provider || "-")} / ${escapeHtml(modelMeta.model || "-")}</span>`,
     `<span class="meta-chip ${modelMeta.available ? "is-ready" : "is-muted"}">Key ${modelMeta.available ? "可用" : "不可用"}</span>`,
     `<span class="meta-chip is-score">${formatScoreSource(scoreSource)}</span>`,
     `<span class="meta-chip ${commentSource === "llm" ? "is-llm" : "is-fallback"}">${formatCommentSource(commentSource)}</span>`,
+    `<span class="meta-chip is-score">格式: ${formatRoleSource(roles.format_evaluation || "local_program")}</span>`,
   ].join("");
 
   renderStatistics(data.statistics);
+  renderScoreDetail(data.metadata?.score_detail || null);
   renderIssueFilters(data.issues);
   renderIssues(data.issues);
   renderTechList(data.technology_stack);
@@ -154,6 +157,35 @@ function renderStatistics(statistics) {
     "statistics-list",
     statistics.map((item) => `${item.label}: ${item.value}`),
   );
+}
+
+function renderScoreDetail(scoreDetail) {
+  const metaNode = document.getElementById("score-detail-meta");
+  const listNode = document.getElementById("score-detail-list");
+  listNode.innerHTML = "";
+
+  if (!scoreDetail || !scoreDetail.criteria || !scoreDetail.criteria.length) {
+    metaNode.textContent = "暂无评分明细";
+    const li = document.createElement("li");
+    li.textContent = "未返回规则化评分明细";
+    listNode.appendChild(li);
+    return;
+  }
+
+  metaNode.textContent =
+    `来源: ${scoreDetail.rubric_source || "score_thesis_tech.json"} | ` +
+    `原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total} | ` +
+    `百分制: ${scoreDetail.score}`;
+  scoreDetail.criteria.forEach((item) => {
+    const li = document.createElement("li");
+    const evidence = (item.evidence || []).join("；") || "暂无证据";
+    const deductions = (item.deductions || []).join("；") || "无明显扣分项";
+    li.innerHTML =
+      `<strong>${escapeHtml(item.name)}: ${item.score}/${item.max_score}</strong>` +
+      `<div class="issue-subline">证据：${escapeHtml(evidence)}</div>` +
+      `<div class="issue-subline">扣分：${escapeHtml(deductions)}</div>`;
+    listNode.appendChild(li);
+  });
 }
 
 function renderIssueFilters(issues) {
@@ -350,7 +382,10 @@ function renderRubric(rubric) {
     `来源: ${rubric.source_name || "rubric.json"} | 总分: ${rubric.total_score}`;
   rubric.items.forEach((item) => {
     const li = document.createElement("li");
-    li.textContent = `${item.criterion}: ${item.score}`;
+    const standards = (item.standard || item.standards || []).join("；");
+    li.textContent = standards
+      ? `${item.criterion}: ${item.score} | ${standards}`
+      : `${item.criterion}: ${item.score}`;
     listNode.appendChild(li);
   });
 }
@@ -410,6 +445,7 @@ function buildMarkdown(data) {
     ? data.technology_stack.map((item) => `- ${item}`).join("\n")
     : "- 未识别到明确技术栈";
   const rubric = buildRubricMarkdown(data.metadata?.rubric || null);
+  const scoreDetail = buildScoreDetailMarkdown(data.metadata?.score_detail || null);
   const formatRequirements = buildFormatRequirementsMarkdown(
     data.metadata?.format_requirements || null,
   );
@@ -420,10 +456,11 @@ function buildMarkdown(data) {
     `- 分数: ${data.score}`,
     `- 类型: ${data.document.source_type}`,
     `- 主题相关占比: ${(data.topic_relevance_ratio * 100).toFixed(1)}%`,
-    `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "rule_engine")}`,
-    `- 评语来源: ${formatCommentSource(data.metadata?.comment_source || "fallback")}`,
+    `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "local_program")}`,
+    `- 内容评价来源: ${formatCommentSource(data.metadata?.comment_source || "fallback")}`,
+    `- 格式检测与评价: ${formatRoleSource(data.metadata?.evaluation_roles?.format_evaluation || "local_program")}`,
     "",
-    "## 总评语",
+    "## 内容评价",
     "",
     data.comment,
     "",
@@ -431,7 +468,11 @@ function buildMarkdown(data) {
     "",
     statistics,
     "",
-    "## 识别问题",
+    "## 评分明细",
+    "",
+    scoreDetail,
+    "",
+    "## 格式检测",
     "",
     issues,
     "",
@@ -454,8 +495,36 @@ function buildRubricMarkdown(rubric) {
     return "- 未上传评分标准";
   }
   return rubric.items
-    .map((item) => `- ${item.criterion}: ${item.score}`)
+    .map((item) => {
+      const standards = (item.standard || item.standards || []).join("；");
+      return standards
+        ? `- ${item.criterion}: ${item.score} | ${standards}`
+        : `- ${item.criterion}: ${item.score}`;
+    })
     .concat([`- 总分: ${rubric.total_score}`])
+    .join("\n");
+}
+
+function buildScoreDetailMarkdown(scoreDetail) {
+  if (!scoreDetail || !scoreDetail.criteria || !scoreDetail.criteria.length) {
+    return "- 未返回评分明细";
+  }
+  return scoreDetail.criteria
+    .map((item) => {
+      const evidence = (item.evidence || []).join("；") || "暂无证据";
+      const deductions = (item.deductions || []).join("；") || "无明显扣分项";
+      const suggestions = (item.suggestions || []).join("；") || "暂无建议";
+      return [
+        `- ${item.name}: ${item.score}/${item.max_score}`,
+        `  - 证据: ${evidence}`,
+        `  - 扣分: ${deductions}`,
+        `  - 建议: ${suggestions}`,
+      ].join("\n");
+    })
+    .concat([
+      `- 原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total}`,
+      `- 百分制: ${scoreDetail.score}`,
+    ])
     .join("\n");
 }
 
@@ -483,6 +552,9 @@ function downloadFile(filename, mimeType, content) {
 }
 
 function formatScoreSource(source) {
+  if (source === "local_program") {
+    return "分数: 本地程序";
+  }
   if (source === "rule_engine") {
     return "分数: 规则引擎";
   }
@@ -491,10 +563,23 @@ function formatScoreSource(source) {
 
 function formatCommentSource(source) {
   if (source === "llm") {
-    return "评语: LLM";
+    return "内容评价: LLM";
   }
   if (source === "fallback") {
-    return "评语: 规则回退";
+    return "内容评价: 本地回退";
+  }
+  return source || "-";
+}
+
+function formatRoleSource(source) {
+  if (source === "local_program") {
+    return "本地程序";
+  }
+  if (source === "llm") {
+    return "LLM";
+  }
+  if (source === "fallback") {
+    return "本地回退";
   }
   return source || "-";
 }

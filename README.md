@@ -5,8 +5,8 @@
 ## 主要功能
 
 - 论文结构解析：支持上传 `md` 或 `docx` 论文，解析标题、章节、段落与句子结构。
-- 基础质量评审：自动统计章节占比、主题相关度、关键词和技术栈，并识别标点误用、口语化表达等问题，分数由规则层独立计算。
-- 大模型评语生成：基于 LangChain 接入多种大模型，默认使用 `deepseek/deepseek-chat` 生成论文总评语，LLM 只负责生成评语，不负责打分。
+- 本地格式检测与评分：自动统计章节占比、主题相关度、关键词和技术栈，并由本地程序识别标点误用、口语化表达等格式问题，分数由本地规则独立计算。
+- 大模型内容评价：基于 LangChain 接入多种大模型，默认使用 `deepseek/deepseek-chat` 生成论文内容评价，LLM 只评价选题、论证、方案、技术路线和创新价值，不负责格式检测或打分。
 - 评分标准读取：支持上传评分标准 `json` 文件，解析后在 UI 中展示，并随评审结果一起返回。
 - 格式要求读取：支持上传格式要求 `json` 文件，解析后在 UI 中展示，并随评审结果一起返回。
 - 历史与复用：自动保存最近评审记录，并记住上次上传的论文、评分标准、格式要求，刷新页面后可直接复用。
@@ -49,14 +49,19 @@ uv run thesisev examples/sample_thesis.md --output structure
 open http://127.0.0.1:8000
 ```
 
-UI 可选上传评分标准 `json` 文件，支持这两种格式：
+UI 可选上传评分标准 `json` 文件，支持扁平分值或带标准说明的结构：
 
 ```json
 {"摘要": 10, "结构": 20, "结论": 10}
 ```
 
 ```json
-[{"摘要": 10}, {"结构": 20}, {"结论": 10}]
+{
+  "选题及工作量": {
+    "standard": ["课题使学生受到本专业全面综合训练", "难易程度、工作量适宜"],
+    "score": 20
+  }
+}
 ```
 
 UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
@@ -71,35 +76,76 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 
 ## 评分逻辑
 
-- 分数由规则层独立计算，当前实现位于 `thesisev/analyzers.py` 的 `calculate_score()`。
-- 评语由 LLM 或规则回退模板生成，当前实现位于 `thesisev/commentary.py`。
+- 格式检测与格式评价由本地程序完成，包括问题清单、格式要求读取和规则化评分明细。
+- 内容评价由 LLM 生成，当前实现位于 `thesisev/commentary.py`；未配置 API Key 时使用本地内容评价模板回退。
+- 分数由本地程序独立计算，当前实现位于 `thesisev/scoring.py` 的 `calculate_score_report()`。
 - 返回结果中：
   - `score` 表示最终分数
-  - `metadata.score_source` 固定为 `rule_engine`
+  - `metadata.score_detail` 表示 6 项规则化评分明细
+  - `metadata.score_source` 固定为 `local_program`
   - `metadata.comment_source` 为 `llm` 或 `fallback`
+  - `metadata.evaluation_roles` 表示格式检测、格式评价和内容评价分别由谁完成
 
 ## 评价标准
 
-1. 选题及工作量（20分）：
-   - 课题使学生受到本专业全面综合训练
-   - 难易程度、工作量适宜
-2. 调查论证（10分）：
-   - 文献资料引用相关
-   - 有收集、分析、综合和正确利用各种信息的能力
-3. 译文（10分）
-   - 英文摘要翻译准确
-   - 语句通顺、流畅
-4. 实验方案、分析与技能（10分）
-   - 实验方案科学合理
-   - 数据采集、计算、处理正确
-   - 论据可靠，分析、论证充分
-   - 工艺可行、推导正确
-   - 有必要的社会、经济效益分析
-5. 论文质量（10分）：
-   - 条理清楚，文理通顺
-   - 用语符合技术规范
-   - 图表清楚，书写格式规范
-6. 创新（5分）：有独特见解，结论有一定应用价值
+### 毕业设计
+
+- 理工科：`config/score_thesis_tech.json`
+
+### 调研报告
+
+- 物联网：`config/score_report_iot.json`
+
+## 六项评分标准实现方案
+
+已新增 `thesisev/scoring.py`，把打分逻辑从 `analyzers.py` 中拆出。`analyzers.py` 继续负责提取结构、关键词、问题、主题相关度等信号，`scoring.py` 只负责把这些信号映射为 6 项标准分。这样可以保持边界清楚：本地程序做格式检测、格式评价和规则分，LLM 只生成内容评价。
+
+输出结构建议：
+
+```json
+{
+  "score": 74,
+  "raw_score": 48.0,
+  "raw_total": 60.0,
+  "score_source": "local_program",
+  "criteria": [
+    {
+      "key": "topic_workload",
+      "name": "选题及工作量",
+      "score": 15.5,
+      "max_score": 20,
+      "evidence": ["章节数 5", "总字数 8200", "主题相关占比 72.4%"],
+      "deductions": ["章节分布略不均衡"],
+      "suggestions": ["补充需求分析或实验验证内容"]
+    }
+  ]
+}
+```
+
+6 项标准的规则化实现：
+
+- [x] `score_topic_workload(document, topic_analysis, technology_details)`：根据内容规模、章节完整度、主题聚焦度和技术覆盖给分。
+- [x] `score_research_argument(document, keywords)`：检测参考文献、引用数量、文献与主题关键词的相关性，以及“因此/表明/综上”等论证表达。
+- [x] `score_translation(document)`：检测是否同时存在中英文摘要，判断英文摘要长度、句子完整性和英文摘要篇幅。
+- [x] `score_experiment_analysis(document, technology_details)`：判断是否包含方案、数据处理、分析论证、可行性或效益分析等要素。
+- [x] `score_writing_quality(document, issues, format_requirements)`：基于问题数量和严重程度扣分，并读取上传的格式要求作为复核依据。
+- [x] `score_innovation(document, technology_details)`：检测“创新/改进/优化/提出/应用价值”等表述，并结合结论章节和技术组合给启发式评分。
+
+总分计算建议：
+
+```python
+raw_score = sum(item.score for item in criteria)
+raw_total = sum(item.max_score for item in criteria)  # 当前为 60
+score = round(raw_score / raw_total * 100)
+```
+
+落地状态：
+
+1. 已新增 `ScoreCriterion`、`ScoreReport` 数据结构，并在 `EvaluationResult.metadata` 中返回 `score_detail`。
+2. 已新增 `thesisev/scoring.py`，实现 6 个 `score_*` 函数和统一入口 `calculate_score_report()`。
+3. 已修改 `api.py`：用 `calculate_score_report()` 替代当前粗粒度 `calculate_score()`，但保留 `score` 字段为百分制。
+4. 已修改 UI：在结果区新增“评分明细”，展示每项得分、扣分原因和证据。
+5. 保持 LLM 只生成内容评价，不参与格式检测、格式评价或任何分数计算。
 
 ## 输出示例
 
@@ -114,9 +160,9 @@ Statistics:
 - 总字数: 213
 - 章节数: 3
 
-Comment:
+Content Evaluation:
 论文围绕 LangChain、论文评价助手设计等内容展开，章节安排较为均衡，
-整体质量较为基础，仍需进一步提升主题聚焦度与学术表达规范性。
+主题关联内容占比基本合理，技术方案已有一定体现。
 ```
 
 API JSON 输出示例：
@@ -133,8 +179,18 @@ API JSON 输出示例：
       {"label": "章节数", "value": "3"}
     ],
     "metadata": {
-      "score_source": "rule_engine",
+      "score_source": "local_program",
+      "score_detail": {
+        "raw_score": 48.0,
+        "raw_total": 60.0,
+        "rubric_source": "score_thesis_tech.json"
+      },
       "comment_source": "llm",
+      "evaluation_roles": {
+        "format_detection": "local_program",
+        "format_evaluation": "local_program",
+        "content_evaluation": "llm"
+      },
       "model": {
         "provider": "deepseek",
         "model": "deepseek-chat"
@@ -161,9 +217,9 @@ curl http://127.0.0.1:8000/last-upload
 ## 说明
 
 - 默认模型：`deepseek/deepseek-chat`
-- 未配置 API Key 时自动回退到规则评语
-- 分数由规则层计算，LLM 只负责生成评语
-- 返回结果中可通过 `metadata.score_source` 和 `metadata.comment_source` 判断分数与评语来源
+- 未配置 API Key 时，内容评价自动回退到本地模板
+- 格式检测与格式评价由本地程序完成，LLM 只负责内容评价
+- 返回结果中可通过 `metadata.score_source`、`metadata.comment_source` 和 `metadata.evaluation_roles` 判断职责来源
 - 最近评审会写入本地 `data/history.json`
 - 现在只支持上传 `md` 或 `docx` 文件评审
 - 上传过一次后，页面刷新或再次评审时会自动复用上次上传的论文、评分标准、格式要求
@@ -174,7 +230,7 @@ curl http://127.0.0.1:8000/last-upload
 - `data/`：运行时数据，包括历史记录、上次上传记录和上传缓存文件
 - `static/`：前端静态资源，包括样式和交互脚本
 - `templates/`：FastAPI 内置 UI 的 HTML 模板
-- `thesisev/`：核心 Python 包，包括解析、分析、评语生成、CLI 和 API
+- `thesisev/`：核心 Python 包，包括解析、分析、本地评分、内容评价生成、CLI 和 API
 - `scripts/`：项目启动脚本
 
 ## 架构图
@@ -185,7 +241,7 @@ curl http://127.0.0.1:8000/last-upload
 flowchart LR
     U["用户层<br/>浏览器 UI / CLI"]
     A["应用层<br/>FastAPI 路由与任务编排"]
-    C["核心能力层<br/>论文解析 / 结构统计 / 问题检测 / 评语生成"]
+    C["核心能力层<br/>论文解析 / 本地格式检测 / 本地评分 / 内容评价"]
     M["模型层<br/>LangChain 多模型接入<br/>默认 DeepSeek"]
     CFG["配置层<br/>规则库 / 模型配置"]
     D["数据层<br/>历史记录 / 上次上传文件"]
@@ -213,10 +269,10 @@ sequenceDiagram
     User->>UI: 上传论文 / 评分标准 / 格式要求
     UI->>API: 发起评审请求
     API->>Data: 读取当前上传或复用上次上传
-    API->>Core: 执行解析、统计、问题检测
-    Core->>LLM: 生成论文总评语
+    API->>Core: 执行解析、统计、本地格式检测与评分
+    Core->>LLM: 生成论文内容评价
     Core->>Config: 读取规则与模型配置
     API->>Data: 保存历史记录与上传状态
     API-->>UI: 返回结构化评审结果
-    UI-->>User: 展示总评、问题、评分标准、格式要求
+    UI-->>User: 展示内容评价、格式检测、评分标准、格式要求
 ```

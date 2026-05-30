@@ -17,12 +17,10 @@ def generate_comment(
     technology_details,
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    score: int,
-    issues,
     root_sections,
     model_config: ModelConfig | None = None,
 ) -> tuple[str, dict[str, Any], str]:
-    """Generate a concise thesis evaluation comment and validation checks."""
+    """Generate a concise content evaluation and validation checks."""
 
     focus_keywords = select_comment_keywords(title=title, fallback_keywords=keywords)
     comment, comment_source = generate_comment_with_llm(
@@ -31,8 +29,6 @@ def generate_comment(
         technology_details=technology_details,
         topic_keywords=topic_keywords,
         topic_relevance_ratio=topic_relevance_ratio,
-        score=score,
-        issues=issues,
         root_sections=root_sections,
         model_config=model_config,
     )
@@ -50,12 +46,10 @@ def generate_comment_with_llm(
     technology_details,
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    score: int,
-    issues,
     root_sections,
     model_config: ModelConfig | None,
 ) -> tuple[str, str]:
-    """Generate commentary with an LLM and fall back to rule-based text."""
+    """Generate content commentary with an LLM and fall back to rule-based text."""
 
     fallback = build_rule_based_comment(
         title=title,
@@ -63,8 +57,6 @@ def generate_comment_with_llm(
         technology_details=technology_details,
         topic_keywords=topic_keywords,
         topic_relevance_ratio=topic_relevance_ratio,
-        score=score,
-        issues=issues,
         root_sections=root_sections,
     )
     if model_config is None or not model_config.is_available():
@@ -76,7 +68,6 @@ def generate_comment_with_llm(
         technology_details=technology_details,
         topic_keywords=topic_keywords,
         topic_relevance_ratio=topic_relevance_ratio,
-        issues=issues,
         root_sections=root_sections,
     )
     try:
@@ -86,8 +77,9 @@ def generate_comment_with_llm(
                 SystemMessage(
                     content=(
                         "你是一名严谨的中文论文评审助手。"
-                        "请根据给定分析结果生成一段 120 到 180 字的论文评价。"
-                        "评价要自然、具体、克制。"
+                        "请根据给定分析结果生成一段 120 到 180 字的内容评价。"
+                        "评价要聚焦选题、论证、方案、技术路线和创新价值。"
+                        "不要评价格式、排版、标点规范，也不要给出分数。"
                         "必须包含至少两个关键词，不要直接复述完整论文标题。"
                     )
                 ),
@@ -110,22 +102,17 @@ def build_rule_based_comment(
     technology_details,
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    score: int,
-    issues,
     root_sections,
 ) -> str:
     """Build the original deterministic comment as a safe fallback."""
 
-    quality_phrase = score_to_phrase(score)
     structure_summary = summarize_structure(root_sections)
     topic_summary = summarize_topic_relevance(topic_keywords, topic_relevance_ratio)
     technology_summary = summarize_technology(technology_details)
-    issue_summary = summarize_issues(issues)
-    score_summary = summarize_score(score)
     focus_text = "、".join(focus_keywords) if focus_keywords else "研究主题"
     comment = (
-        f"论文围绕{focus_text}等内容展开，{structure_summary}，整体质量{quality_phrase}。"
-        f"{topic_summary}{technology_summary}{issue_summary}{score_summary}"
+        f"论文围绕{focus_text}等内容展开，{structure_summary}。"
+        f"{topic_summary}{technology_summary}"
     )
     return comment.replace(title, focus_text)
 
@@ -137,10 +124,9 @@ def build_comment_prompt(
     technology_details,
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    issues,
     root_sections,
 ) -> str:
-    """Build the LLM prompt from structured thesis signals."""
+    """Build an LLM prompt from content-related thesis signals."""
 
     grouped: dict[str, list[str]] = defaultdict(list)
     for item in technology_details:
@@ -150,13 +136,6 @@ def build_comment_prompt(
             f"{category}: {', '.join(names[:4])}" for category, names in grouped.items()
         )
         or "未提取到明确技术栈"
-    )
-    issue_summary = (
-        "；".join(
-            f"{issue.category}/{issue.severity}: {issue.message}"
-            for issue in issues[:6]
-        )
-        or "未发现明显格式或表达问题"
     )
     section_summary = (
         "；".join(
@@ -172,8 +151,8 @@ def build_comment_prompt(
         f"主题相关内容占比：{topic_relevance_ratio * 100:.1f}%\n"
         f"章节分布：{section_summary}\n"
         f"技术栈：{technology_summary}\n"
-        f"问题概览：{issue_summary}\n"
-        "请输出一段中文评语，不要分点。"
+        "请只评价论文内容质量，不要讨论格式、标点、排版或评分。"
+        "请输出一段中文内容评价，不要分点。"
     )
 
 
@@ -192,18 +171,6 @@ def extract_response_text(response: Any) -> str:
                 parts.append(item["text"])
         return "".join(parts)
     return str(content)
-
-
-def score_to_phrase(score: int) -> str:
-    """Map a score to a short quality phrase."""
-
-    if score >= 90:
-        return "较为完整"
-    if score >= 80:
-        return "基本清晰"
-    if score >= 70:
-        return "较为基础"
-    return "仍需加强"
 
 
 def select_comment_keywords(title: str, fallback_keywords: list[str]) -> list[str]:
@@ -288,33 +255,6 @@ def summarize_topic_relevance(
     if topic_relevance_ratio >= 0.45:
         return f"主题关联内容占比基本合理，核心内容能够围绕{keyword_text}展开。"
     return f"与{keyword_text}相关的内容占比仍然偏低，存在一定偏题风险。"
-
-
-def summarize_issues(issues) -> str:
-    """Summarize issue detection results for the comment."""
-
-    issue_count = len(issues)
-    if issue_count == 0:
-        return "全文表达较为规范，暂未发现明显格式或口语化问题。"
-    medium_count = sum(issue.severity == "medium" for issue in issues)
-    categories = {issue.category for issue in issues}
-    if medium_count <= 2 and issue_count <= 3:
-        return "文中存在少量格式或表达细节需要润色，但整体不影响主要内容呈现。"
-    if {"标点误用", "口语化表达"} <= categories:
-        return "文中在标点规范性与学术化表达方面仍有较明显的优化空间，建议集中修订。"
-    return "文中仍存在若干表达与规范问题，建议在正式提交前统一校正。"
-
-
-def summarize_score(score: int) -> str:
-    """Generate a score-consistent closing sentence."""
-
-    if score >= 90:
-        return "综合来看，该文完成度较高。"
-    if score >= 80:
-        return "综合来看，该文整体表现较为稳健。"
-    if score >= 70:
-        return "综合来看，该文具有一定完成度。"
-    return "综合来看，该文仍需进一步打磨。"
 
 
 def assess_comment(*, comment: str, title: str, keywords: list[str]) -> dict[str, Any]:

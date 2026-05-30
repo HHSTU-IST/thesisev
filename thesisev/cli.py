@@ -114,7 +114,7 @@ def print_report(result) -> None:
             print(f"- {category}: {'、'.join(names)}")
     print()
     print(f"Score: {result.score}")
-    print("Comment:")
+    print("Content Evaluation:")
     print(result.comment)
     print("Comment Checks:")
     print(
@@ -124,7 +124,7 @@ def print_report(result) -> None:
         f"- title_repetition: {'ok' if not result.comment_checks.get('repeats_title') else 'needs review'}"
     )
     print()
-    print("Issues:")
+    print("Format Issues:")
     if not result.issues:
         print("- None")
         return
