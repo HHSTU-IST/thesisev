@@ -7,6 +7,7 @@ const providerDefaults = {
 
 const state = {
   result: null,
+  lastUpload: null,
   activeIssueFilter: "all",
   activeSectionId: null,
   activeIssueKey: null,
@@ -16,11 +17,15 @@ const form = document.getElementById("evaluate-form");
 const providerInput = document.getElementById("provider");
 const modelInput = document.getElementById("model");
 const fileInput = document.getElementById("file");
+const rubricFileInput = document.getElementById("rubric-file");
+const formatFileInput = document.getElementById("format-file");
 const submitButton = document.getElementById("submit-button");
 const statusNode = document.getElementById("status");
 const resultsNode = document.getElementById("results");
 const exportMdButton = document.getElementById("export-md");
 const refreshHistoryButton = document.getElementById("refresh-history");
+const lastUploadListNode = document.getElementById("last-upload-list");
+const reuseHintNode = document.getElementById("reuse-hint");
 
 providerInput.addEventListener("change", () => {
   modelInput.value = providerDefaults[providerInput.value] || "";
@@ -32,6 +37,7 @@ refreshHistoryButton.addEventListener("click", () => {
 });
 
 void loadHistory();
+void loadLastUpload();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -65,9 +71,16 @@ async function submitEvaluation() {
   const file = fileInput.files[0];
   if (file) {
     formData.append("file", file);
-    return postForm("/evaluate/upload", formData);
   }
-  throw new Error("请先上传论文文件");
+  const rubricFile = rubricFileInput.files[0];
+  if (rubricFile) {
+    formData.append("rubric_file", rubricFile);
+  }
+  const formatFile = formatFileInput.files[0];
+  if (formatFile) {
+    formData.append("format_file", formatFile);
+  }
+  return postForm("/evaluate/upload", formData);
 }
 
 async function postForm(url, formData) {
@@ -86,6 +99,13 @@ async function loadHistory() {
   const response = await fetch("/history");
   const payload = await response.json();
   renderHistory(payload.data?.items || []);
+}
+
+async function loadLastUpload() {
+  const response = await fetch("/last-upload");
+  const payload = await response.json();
+  state.lastUpload = payload.data?.items || null;
+  renderLastUpload(state.lastUpload);
 }
 
 function renderResults() {
@@ -116,6 +136,12 @@ function renderResults() {
   renderIssues(data.issues);
   renderTechList(data.technology_stack);
   renderSectionTree(data.document.root_sections);
+  renderRubric(data.metadata?.rubric || null);
+  renderFormatRequirements(data.metadata?.format_requirements || null);
+  if (data.metadata?.last_upload) {
+    state.lastUpload = data.metadata.last_upload;
+    renderLastUpload(state.lastUpload);
+  }
 }
 
 function renderStatistics(statistics) {
@@ -272,6 +298,85 @@ function renderHistory(items) {
   });
 }
 
+function renderLastUpload(lastUpload) {
+  lastUploadListNode.innerHTML = "";
+  const labels = {
+    thesis: "论文",
+    rubric: "评分标准",
+    format_requirements: "格式要求",
+  };
+  const order = ["thesis", "rubric", "format_requirements"];
+  let availableCount = 0;
+
+  order.forEach((key) => {
+    const entry = lastUpload?.[key] || null;
+    const li = document.createElement("li");
+    if (!entry || !entry.available) {
+      li.textContent = `${labels[key]}: 暂无`;
+      lastUploadListNode.appendChild(li);
+      return;
+    }
+    availableCount += 1;
+    li.textContent =
+      `${labels[key]}: ${entry.filename} · ${entry.size} bytes · ${entry.updated_at}`;
+    lastUploadListNode.appendChild(li);
+  });
+
+  reuseHintNode.textContent =
+    availableCount > 0
+      ? "未重新选择文件时，系统会自动复用上次上传文件。重新上传后会覆盖对应类型的上次记录。"
+      : "当前还没有可复用的上传记录，请先至少上传一次论文文件。";
+}
+
+function renderRubric(rubric) {
+  const metaNode = document.getElementById("rubric-meta");
+  const listNode = document.getElementById("rubric-list");
+  listNode.innerHTML = "";
+
+  if (!rubric || !rubric.items || !rubric.items.length) {
+    metaNode.textContent = "未上传评分标准";
+    const li = document.createElement("li");
+    li.textContent = "暂无评分标准";
+    listNode.appendChild(li);
+    return;
+  }
+
+  metaNode.textContent =
+    `来源: ${rubric.source_name || "rubric.json"} | 总分: ${rubric.total_score}`;
+  rubric.items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = `${item.criterion}: ${item.score}`;
+    listNode.appendChild(li);
+  });
+}
+
+function renderFormatRequirements(formatRequirements) {
+  const metaNode = document.getElementById("format-meta");
+  const listNode = document.getElementById("format-list");
+  listNode.innerHTML = "";
+
+  if (
+    !formatRequirements ||
+    !formatRequirements.items ||
+    !formatRequirements.items.length
+  ) {
+    metaNode.textContent = "未上传格式要求";
+    const li = document.createElement("li");
+    li.textContent = "暂无格式要求";
+    listNode.appendChild(li);
+    return;
+  }
+
+  metaNode.textContent =
+    `来源: ${formatRequirements.source_name || "format_requirements.json"} | ` +
+    `条目数: ${formatRequirements.item_count || formatRequirements.items.length}`;
+  formatRequirements.items.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = `${item.label}: ${item.value}`;
+    listNode.appendChild(li);
+  });
+}
+
 function exportResult(format) {
   if (!state.result) {
     setLoading(false, "暂无可导出的结果");
@@ -299,6 +404,10 @@ function buildMarkdown(data) {
   const tech = data.technology_stack.length
     ? data.technology_stack.map((item) => `- ${item}`).join("\n")
     : "- 未识别到明确技术栈";
+  const rubric = buildRubricMarkdown(data.metadata?.rubric || null);
+  const formatRequirements = buildFormatRequirementsMarkdown(
+    data.metadata?.format_requirements || null,
+  );
 
   return [
     `# ${data.document.title}`,
@@ -322,7 +431,38 @@ function buildMarkdown(data) {
     "## 技术栈",
     "",
     tech,
+    "",
+    "## 评分标准",
+    "",
+    rubric,
+    "",
+    "## 格式要求",
+    "",
+    formatRequirements,
   ].join("\n");
+}
+
+function buildRubricMarkdown(rubric) {
+  if (!rubric || !rubric.items || !rubric.items.length) {
+    return "- 未上传评分标准";
+  }
+  return rubric.items
+    .map((item) => `- ${item.criterion}: ${item.score}`)
+    .concat([`- 总分: ${rubric.total_score}`])
+    .join("\n");
+}
+
+function buildFormatRequirementsMarkdown(formatRequirements) {
+  if (
+    !formatRequirements ||
+    !formatRequirements.items ||
+    !formatRequirements.items.length
+  ) {
+    return "- 未上传格式要求";
+  }
+  return formatRequirements.items
+    .map((item) => `- ${item.label}: ${item.value}`)
+    .join("\n");
 }
 
 function downloadFile(filename, mimeType, content) {

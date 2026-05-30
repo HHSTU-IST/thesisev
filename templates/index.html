@@ -26,6 +26,16 @@
         </label>
 
         <label class="field">
+          <span>评分标准 JSON</span>
+          <input id="rubric-file" name="rubric_file" type="file" accept=".json" />
+        </label>
+
+        <label class="field">
+          <span>格式要求 JSON</span>
+          <input id="format-file" name="format_file" type="file" accept=".json" />
+        </label>
+
+        <label class="field">
           <span>模型提供方</span>
           <select id="provider" name="provider">
             <option value="deepseek">deepseek</option>
@@ -53,6 +63,12 @@
         <div class="actions field-span-2">
           <button id="submit-button" type="submit">开始评价</button>
           <p id="status" class="status">等待输入</p>
+        </div>
+
+        <div class="field field-span-2">
+          <span>上次上传</span>
+          <p id="reuse-hint" class="status">未重新选择文件时，系统会自动复用上次上传的论文、评分标准和格式要求。</p>
+          <ul id="last-upload-list" class="list"></ul>
         </div>
       </form>
     </section>
@@ -114,6 +130,18 @@
       <article class="panel result-card">
         <h2>技术栈</h2>
         <ul id="tech-list" class="pill-list"></ul>
+      </article>
+
+      <article class="panel result-card">
+        <h2>评分标准</h2>
+        <div id="rubric-meta" class="meta-line"></div>
+        <ul id="rubric-list" class="list"></ul>
+      </article>
+
+      <article class="panel result-card">
+        <h2>格式要求</h2>
+        <div id="format-meta" class="meta-line"></div>
+        <ul id="format-list" class="list"></ul>
       </article>
     </section>
   </main>

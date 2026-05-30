@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
-DATA_DIR = Path(__file__).with_name("data")
+from thesisev.paths import data_dir
+
+DATA_DIR = data_dir()
 
 
 def load_json_resource(filename: str) -> Any:

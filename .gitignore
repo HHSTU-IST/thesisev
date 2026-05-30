@@ -37,5 +37,7 @@ examples
 
 history.json
 test.*
-thesisev/data/history.json
+data/history.json
+data/last_upload.json
+data/uploads/
 thesisev/**/__pycache__/

@@ -5,10 +5,10 @@ from __future__ import annotations
 import os
 import tomllib
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from langchain.chat_models import init_chat_model
+from thesisev.paths import data_dir
 
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL = "deepseek-chat"
@@ -111,7 +111,7 @@ def create_chat_model(config: ModelConfig):
 def load_provider_env_mapping() -> dict[str, tuple[str | None, str | None]]:
     """Load provider env mapping from the bundled TOML config."""
 
-    config_path = Path(__file__) / "provider_env.toml"
+    config_path = data_dir() / "provider_env.toml"
     with config_path.open("rb") as file:
         config = tomllib.load(file)
 

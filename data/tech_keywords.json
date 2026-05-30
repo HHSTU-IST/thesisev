@@ -2,86 +2,139 @@
   {
     "name": "Python",
     "category": "编程语言",
-    "aliases": ["Python", "python"]
+    "aliases": [
+      "Python",
+      "python"
+    ]
   },
   {
     "name": "Java",
     "category": "编程语言",
-    "aliases": ["Java", "java"]
+    "aliases": [
+      "Java",
+      "java"
+    ]
   },
   {
     "name": "C++",
     "category": "编程语言",
-    "aliases": ["C++", "c++"]
+    "aliases": [
+      "C++",
+      "c++"
+    ]
   },
   {
     "name": "LangChain",
     "category": "模型框架",
-    "aliases": ["LangChain", "langchain"]
+    "aliases": [
+      "LangChain",
+      "langchain"
+    ]
   },
   {
     "name": "FAISS",
     "category": "向量检索",
-    "aliases": ["FAISS", "faiss"]
+    "aliases": [
+      "FAISS",
+      "faiss"
+    ]
   },
   {
     "name": "NumPy",
     "category": "数据处理",
-    "aliases": ["NumPy", "numpy"]
+    "aliases": [
+      "NumPy",
+      "numpy"
+    ]
   },
   {
     "name": "Pandas",
     "category": "数据处理",
-    "aliases": ["Pandas", "pandas"]
+    "aliases": [
+      "Pandas",
+      "pandas"
+    ]
   },
   {
     "name": "PyTorch",
     "category": "机器学习框架",
-    "aliases": ["PyTorch", "pytorch"]
+    "aliases": [
+      "PyTorch",
+      "pytorch"
+    ]
   },
   {
     "name": "TensorFlow",
     "category": "机器学习框架",
-    "aliases": ["TensorFlow", "tensorflow"]
+    "aliases": [
+      "TensorFlow",
+      "tensorflow"
+    ]
   },
   {
     "name": "Scikit-learn",
     "category": "机器学习框架",
-    "aliases": ["Scikit-learn", "scikit-learn", "sklearn"]
+    "aliases": [
+      "Scikit-learn",
+      "scikit-learn",
+      "sklearn"
+    ]
   },
   {
     "name": "OpenAI",
     "category": "模型平台",
-    "aliases": ["OpenAI", "openai"]
+    "aliases": [
+      "OpenAI",
+      "openai"
+    ]
   },
   {
     "name": "MySQL",
     "category": "数据库",
-    "aliases": ["MySQL", "mysql"]
+    "aliases": [
+      "MySQL",
+      "mysql"
+    ]
   },
   {
     "name": "PostgreSQL",
     "category": "数据库",
-    "aliases": ["PostgreSQL", "postgresql", "postgres"]
+    "aliases": [
+      "PostgreSQL",
+      "postgresql",
+      "postgres"
+    ]
   },
   {
     "name": "Redis",
     "category": "数据库",
-    "aliases": ["Redis", "redis"]
+    "aliases": [
+      "Redis",
+      "redis"
+    ]
   },
   {
     "name": "Docker",
     "category": "工程基础设施",
-    "aliases": ["Docker", "docker"]
+    "aliases": [
+      "Docker",
+      "docker"
+    ]
   },
   {
     "name": "FastAPI",
     "category": "Web 框架",
-    "aliases": ["FastAPI", "fastapi"]
+    "aliases": [
+      "FastAPI",
+      "fastapi"
+    ]
   },
   {
     "name": "Flask",
     "category": "Web 框架",
-    "aliases": ["Flask", "flask"]
+    "aliases": [
+      "Flask",
+      "flask"
+    ]
   }
 ]
