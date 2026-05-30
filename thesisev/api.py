@@ -298,7 +298,9 @@ def build_history_entry(result) -> dict[str, Any]:
 
     return {
         "id": uuid.uuid4().hex,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "created_at": datetime.now(tz=datetime.timezone.utc).isoformat(
+            timespec="seconds"
+        ),
         "title": result.document.title,
         "source_type": result.document.source_type,
         "score": result.score,

@@ -5,8 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from xml.etree import ElementTree
 from zipfile import ZipFile
+
+from defusedxml import ElementTree
 
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
 

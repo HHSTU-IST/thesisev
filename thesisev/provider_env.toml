@@ -1,0 +1,13 @@
+[providers.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+base_url_env = "DEEPSEEK_BASE_URL"
+
+[providers.openai]
+api_key_env = "OPENAI_API_KEY"
+base_url_env = "OPENAI_BASE_URL"
+
+[providers.anthropic]
+api_key_env = "ANTHROPIC_API_KEY"
+
+[providers.google_genai]
+api_key_env = "GOOGLE_API_KEY"

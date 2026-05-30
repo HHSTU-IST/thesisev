@@ -3,20 +3,16 @@
 from __future__ import annotations
 
 import os
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from langchain.chat_models import init_chat_model
 
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL = "deepseek-chat"
-
-PROVIDER_ENV_MAPPING = {
-    "deepseek": ("DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL"),
-    "openai": ("OPENAI_API_KEY", "OPENAI_BASE_URL"),
-    "anthropic": ("ANTHROPIC_API_KEY", None),
-    "google_genai": ("GOOGLE_API_KEY", None),
-}
+PROVIDER_ENV_MAPPING = {}
 
 
 @dataclass(slots=True)
@@ -110,3 +106,20 @@ def create_chat_model(config: ModelConfig):
         model_provider=config.provider,
         **extra_kwargs,
     )
+
+
+def load_provider_env_mapping() -> dict[str, tuple[str | None, str | None]]:
+    """Load provider env mapping from the bundled TOML config."""
+
+    config_path = Path(__file__) / "provider_env.toml"
+    with config_path.open("rb") as file:
+        config = tomllib.load(file)
+
+    providers = config.get("providers", {})
+    return {
+        provider: (values.get("api_key_env"), values.get("base_url_env"))
+        for provider, values in providers.items()
+    }
+
+
+PROVIDER_ENV_MAPPING = load_provider_env_mapping()

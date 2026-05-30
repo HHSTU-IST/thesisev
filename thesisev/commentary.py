@@ -36,10 +36,14 @@ def generate_comment(
         root_sections=root_sections,
         model_config=model_config,
     )
-    checks = assess_comment(comment=comment, title=title, keywords=focus_keywords, score=score)
+    checks = assess_comment(
+        comment=comment, title=title, keywords=focus_keywords, score=score
+    )
     if not checks["passes_keyword_coverage"]:
         comment = reinforce_keyword_coverage(comment, checks["missing_keywords"])
-        checks = assess_comment(comment=comment, title=title, keywords=focus_keywords, score=score)
+        checks = assess_comment(
+            comment=comment, title=title, keywords=focus_keywords, score=score
+        )
     return comment, checks
 
 
@@ -147,15 +151,26 @@ def build_comment_prompt(
     grouped: dict[str, list[str]] = defaultdict(list)
     for item in technology_details:
         grouped[item.category].append(item.name)
-    technology_summary = "；".join(
-        f"{category}: {', '.join(names[:4])}" for category, names in grouped.items()
-    ) or "未提取到明确技术栈"
-    issue_summary = "；".join(
-        f"{issue.category}/{issue.severity}: {issue.message}" for issue in issues[:6]
-    ) or "未发现明显格式或表达问题"
-    section_summary = "；".join(
-        f"{section.title}({section.ratio * 100:.1f}%)" for section in root_sections[:6]
-    ) or "未识别到稳定章节结构"
+    technology_summary = (
+        "；".join(
+            f"{category}: {', '.join(names[:4])}" for category, names in grouped.items()
+        )
+        or "未提取到明确技术栈"
+    )
+    issue_summary = (
+        "；".join(
+            f"{issue.category}/{issue.severity}: {issue.message}"
+            for issue in issues[:6]
+        )
+        or "未发现明显格式或表达问题"
+    )
+    section_summary = (
+        "；".join(
+            f"{section.title}({section.ratio * 100:.1f}%)"
+            for section in root_sections[:6]
+        )
+        or "未识别到稳定章节结构"
+    )
     return (
         f"论文标题：{title}\n"
         f"建议覆盖关键词：{'、'.join(focus_keywords) or '研究主题'}\n"
