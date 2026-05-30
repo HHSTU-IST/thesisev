@@ -135,7 +135,7 @@ function renderResults() {
     `<span class="meta-chip ${modelMeta.available ? "is-ready" : "is-muted"}">Key ${modelMeta.available ? "可用" : "不可用"}</span>`,
     `<span class="meta-chip is-score">${formatScoreSource(scoreSource)}</span>`,
     `<span class="meta-chip ${commentSource === "llm" ? "is-llm" : "is-fallback"}">${formatCommentSource(commentSource)}</span>`,
-    `<span class="meta-chip is-score">格式: ${formatRoleSource(roles.format_evaluation || "local_program")}</span>`,
+    `<span class="meta-chip is-score">格式检测与评价: ${formatRoleSource(roles.format_evaluation || "local_program")}</span>`,
   ].join("");
 
   renderStatistics(data.statistics);
@@ -173,7 +173,8 @@ function renderScoreDetail(scoreDetail) {
   }
 
   metaNode.textContent =
-    `来源: ${scoreDetail.rubric_source || "score_thesis_tech.json"} | ` +
+    `分数来源: ${formatScoreSource(scoreDetail.score_source || "local_program")} | ` +
+    `评分标准: ${scoreDetail.rubric_source || "score_thesis_tech.json"} | ` +
     `原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total} | ` +
     `百分制: ${scoreDetail.score}`;
   scoreDetail.criteria.forEach((item) => {
@@ -522,6 +523,7 @@ function buildScoreDetailMarkdown(scoreDetail) {
       ].join("\n");
     })
     .concat([
+      `- 分数来源: ${formatScoreSource(scoreDetail.score_source || "local_program")}`,
       `- 原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total}`,
       `- 百分制: ${scoreDetail.score}`,
     ])

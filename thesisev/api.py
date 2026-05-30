@@ -603,6 +603,7 @@ def evaluate_document(
         technology_details=technology_details,
         format_requirements=format_requirements,
         rubric=rubric,
+        model_config=runtime_model_config,
     )
     score = score_report.score
     runtime_model_config = model_config or build_model_config(
@@ -636,7 +637,7 @@ def evaluate_document(
         metadata={
             "version": "0.1.0",
             "topic_analysis": topic_analysis,
-            "score_source": "local_program",
+            "score_source": score_report.score_source,
             "score_detail": score_report.to_dict(),
             "comment_source": comment_source,
             "evaluation_roles": {

@@ -78,11 +78,11 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 
 - 格式检测与格式评价由本地程序完成，包括问题清单、格式要求读取和规则化评分明细。
 - 内容评价由 LLM 生成，当前实现位于 `thesisev/commentary.py`；未配置 API Key 时使用本地内容评价模板回退。
-- 分数由本地程序独立计算，当前实现位于 `thesisev/scoring.py` 的 `calculate_score_report()`。
+- 六项评分标准由 LLM 生成，当前实现位于 `thesisev/scoring.py` 的 `calculate_score_report()`；未配置 API Key 时回退到本地规则。
 - 返回结果中：
   - `score` 表示最终分数
   - `metadata.score_detail` 表示 6 项规则化评分明细
-  - `metadata.score_source` 固定为 `local_program`
+  - `metadata.score_source` 为 `llm` 或 `local`
   - `metadata.comment_source` 为 `llm` 或 `fallback`
   - `metadata.evaluation_roles` 表示格式检测、格式评价和内容评价分别由谁完成
 
@@ -90,15 +90,16 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
 
 ### 毕业设计
 
-- 理工科：`config/score_thesis_tech.json`
+- 理工科：`data/score_thesis_tech.json`
 
 ### 调研报告
 
-- 物联网：`config/score_report_iot.json`
+- 物联网：`data/score_report_iot.json`
 
-## 六项评分标准实现方案
+## 毕业设计评分实现方案
 
-已新增 `thesisev/scoring.py`，把打分逻辑从 `analyzers.py` 中拆出。`analyzers.py` 继续负责提取结构、关键词、问题、主题相关度等信号，`scoring.py` 只负责把这些信号映射为 6 项标准分。这样可以保持边界清楚：本地程序做格式检测、格式评价和规则分，LLM 只生成内容评价。
+- `analyzers.py` 继续负责提取结构、关键词、问题、主题相关度等信号
+- `scoring.py` 负责把这些信号整理给 LLM 生成 6 项标准分，失败时回退到本地规则。
 
 输出结构建议：
 
@@ -107,7 +108,7 @@ UI 也可选上传格式要求 `json` 文件，支持对象或数组，例如：
   "score": 74,
   "raw_score": 48.0,
   "raw_total": 60.0,
-  "score_source": "local_program",
+  "score_source": "llm",
   "criteria": [
     {
       "key": "topic_workload",
@@ -142,10 +143,10 @@ score = round(raw_score / raw_total * 100)
 落地状态：
 
 1. 已新增 `ScoreCriterion`、`ScoreReport` 数据结构，并在 `EvaluationResult.metadata` 中返回 `score_detail`。
-2. 已新增 `thesisev/scoring.py`，实现 6 个 `score_*` 函数和统一入口 `calculate_score_report()`。
-3. 已修改 `api.py`：用 `calculate_score_report()` 替代当前粗粒度 `calculate_score()`，但保留 `score` 字段为百分制。
+2. 已更新 `thesisev/scoring.py`，优先让 LLM 生成六项评分，失败时回退到本地规则。
+3. 已修改 `api.py`：`calculate_score_report()` 继续输出百分制总分，同时保留 `score_detail`。
 4. 已修改 UI：在结果区新增“评分明细”，展示每项得分、扣分原因和证据。
-5. 保持 LLM 只生成内容评价，不参与格式检测、格式评价或任何分数计算。
+5. 保持格式检测由本地程序完成，LLM 负责内容评价与六项评分标准。
 
 ## 输出示例
 
@@ -179,11 +180,12 @@ API JSON 输出示例：
       {"label": "章节数", "value": "3"}
     ],
     "metadata": {
-      "score_source": "local_program",
+      "score_source": "llm",
       "score_detail": {
         "raw_score": 48.0,
         "raw_total": 60.0,
-        "rubric_source": "score_thesis_tech.json"
+        "rubric_source": "score_thesis_tech.json",
+        "score_source": "llm"
       },
       "comment_source": "llm",
       "evaluation_roles": {

@@ -26,6 +26,7 @@ __pycache__
 *.pdf
 
 ### Python ###
+__pycache__
 .ruff_cache
 *.pt
 *.pth
@@ -34,10 +35,9 @@ __pycache__
 
 articles
 examples
-
-history.json
 test.*
+
 data/history.json
 data/last_upload.json
 data/uploads/
-thesisev/**/__pycache__/
+

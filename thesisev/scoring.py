@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import re
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from thesisev.llm import ModelConfig, create_chat_model
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 
@@ -48,6 +53,7 @@ class ScoreReport:
     raw_total: float
     criteria: list[ScoreCriterion]
     rubric_source: str
+    score_source: str
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the report to a JSON-friendly dictionary."""
@@ -57,6 +63,7 @@ class ScoreReport:
             "raw_score": self.raw_score,
             "raw_total": self.raw_total,
             "rubric_source": self.rubric_source,
+            "score_source": self.score_source,
             "criteria": [criterion.to_dict() for criterion in self.criteria],
         }
 
@@ -67,6 +74,7 @@ class RubricItem:
 
     name: str
     standards: list[str]
+    evaluation: str
     max_score: float
 
 
@@ -80,12 +88,102 @@ def calculate_score_report(
     format_requirements: dict[str, Any] | None = None,
     rubric: dict[str, Any] | None = None,
     rubric_filename: str = DEFAULT_THESIS_TECH_RUBRIC,
+    model_config: ModelConfig | None = None,
 ) -> ScoreReport:
-    """Calculate a rubric-based percentage score from deterministic signals."""
+    """Calculate a rubric-based percentage score from LLM or fallback signals."""
 
     rubric_items, rubric_source = resolve_rubric_items(
         rubric=rubric, rubric_filename=rubric_filename
     )
+    if model_config is not None and model_config.is_available():
+        try:
+            return calculate_score_report_with_llm(
+                document=document,
+                topic_analysis=topic_analysis,
+                issues=issues,
+                keywords=keywords,
+                technology_details=technology_details,
+                format_requirements=format_requirements,
+                rubric_items=rubric_items,
+                rubric_source=rubric_source,
+                rubric_filename=rubric_source,
+                model_config=model_config,
+            )
+        except Exception:
+            pass
+    return calculate_score_report_local(
+        document=document,
+        topic_analysis=topic_analysis,
+        issues=issues,
+        keywords=keywords,
+        technology_details=technology_details,
+        format_requirements=format_requirements,
+        rubric_items=rubric_items,
+        rubric_source=rubric_source,
+    )
+
+
+def calculate_score_report_with_llm(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_items: list[RubricItem],
+    rubric_source: str,
+    rubric_filename: str,
+    model_config: ModelConfig,
+) -> ScoreReport:
+    """Calculate rubric scores by asking an LLM for each criterion."""
+
+    prompt = build_score_prompt(
+        document=document,
+        topic_analysis=topic_analysis,
+        issues=issues,
+        keywords=keywords,
+        technology_details=technology_details,
+        format_requirements=format_requirements,
+        rubric_items=rubric_items,
+        rubric_filename=rubric_filename,
+    )
+    model = create_chat_model(model_config)
+    response = model.invoke(
+        [
+            SystemMessage(
+                content=(
+                    "你是一名严谨的中文论文评分老师。"
+                    "你只负责六项评分标准打分，不负责格式检测。"
+                    "请根据提供的论文信息、本地检测结果和评分标准，给出六项标准的分数。"
+                    "必须只输出纯 JSON，不要 Markdown，不要解释。"
+                )
+            ),
+            HumanMessage(content=prompt),
+        ]
+    )
+    payload = parse_llm_json_response(response)
+    criteria = normalize_llm_score_criteria(payload, rubric_items)
+    return build_score_report(
+        criteria=criteria,
+        rubric_source=rubric_source,
+        score_source="llm",
+    )
+
+
+def calculate_score_report_local(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_items: list[RubricItem],
+    rubric_source: str,
+) -> ScoreReport:
+    """Fallback deterministic score calculation."""
+
     item_by_name = {item.name: item for item in rubric_items}
     criteria = [
         score_topic_workload(
@@ -109,6 +207,21 @@ def calculate_score_report(
         ),
         score_innovation(document, technology_details, item_by_name["创新"]),
     ]
+    return build_score_report(
+        criteria=criteria,
+        rubric_source=rubric_source,
+        score_source="local_program",
+    )
+
+
+def build_score_report(
+    *,
+    criteria: list[ScoreCriterion],
+    rubric_source: str,
+    score_source: str,
+) -> ScoreReport:
+    """Build a normalized score report from criterion scores."""
+
     raw_score = round(sum(item.score for item in criteria), 2)
     raw_total = round(sum(item.max_score for item in criteria), 2)
     score = round(raw_score / max(raw_total, 1) * 100)
@@ -118,7 +231,158 @@ def calculate_score_report(
         raw_total=raw_total,
         criteria=criteria,
         rubric_source=rubric_source,
+        score_source=score_source,
     )
+
+
+def build_score_prompt(
+    *,
+    document: ThesisDocument,
+    topic_analysis: dict[str, Any],
+    issues: list[Issue],
+    keywords: list[str],
+    technology_details: list[TechnologyStackItem],
+    format_requirements: dict[str, Any] | None,
+    rubric_items: list[RubricItem],
+    rubric_filename: str,
+) -> str:
+    """Build an LLM prompt for rubric scoring."""
+
+    issue_summary = summarize_issues(issues)
+    tech_summary = [
+        {
+            "name": item.name,
+            "category": item.category,
+            "matched_terms": item.matched_terms,
+        }
+        for item in technology_details
+    ]
+    rubric_summary = [
+        {
+            "name": item.name,
+            "score": item.max_score,
+            "standards": item.standards,
+            "evaluation": item.evaluation,
+        }
+        for item in rubric_items
+    ]
+    payload = {
+        "title": document.title,
+        "source_type": document.source_type,
+        "total_word_count": document.total_word_count,
+        "section_count": len(document.sections),
+        "topic_analysis": {
+            "document_ratio": topic_analysis.get("document_ratio", 0),
+            "topic_keywords": topic_analysis.get("topic_keywords", []),
+        },
+        "keywords": keywords,
+        "technology_details": tech_summary,
+        "issues": issue_summary,
+        "format_requirements": format_requirements,
+        "rubric_source": rubric_filename,
+        "rubric": rubric_summary,
+    }
+    return (
+        "请根据以下论文信息，为六项评分标准分别打分，并输出严格 JSON。\n"
+        "JSON 结构必须为：\n"
+        "{"
+        '"criteria":[{"key":"选题及工作量","name":"选题及工作量","score":0,"max_score":20,'
+        '"evidence":["..."],"deductions":["..."],"suggestions":["..."]}...],'
+        '"raw_score":0,"raw_total":0,"score":0'
+        "}\n"
+        "要求：\n"
+        "1. 六项 criteria 必须全部返回。\n"
+        "2. score 为百分制总分，raw_score 为六项原始分总和，raw_total 为六项满分总和。\n"
+        "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
+        "4. 评分必须参考评分标准，但分数由你综合判断。\n"
+        "5. 证据、扣分原因、建议都要简洁具体。\n"
+        f"论文信息：{json.dumps(payload, ensure_ascii=False)}"
+    )
+
+
+def parse_llm_json_response(response: Any) -> dict[str, Any]:
+    """Parse JSON from an LLM response."""
+
+    text = extract_response_text(response).strip()
+    if not text:
+        raise ValueError("empty llm response")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        return json.loads(text[start : end + 1])
+
+
+def normalize_llm_score_criteria(
+    payload: dict[str, Any], rubric_items: list[RubricItem]
+) -> list[ScoreCriterion]:
+    """Normalize LLM score payload into score criteria."""
+
+    rubric_by_name = {item.name: item for item in rubric_items}
+    item_by_key = {item.name: item.name for item in rubric_items}
+    criteria_payload = payload.get("criteria", [])
+    if not isinstance(criteria_payload, list):
+        raise ValueError("llm score payload criteria must be a list")
+
+    criteria: list[ScoreCriterion] = []
+    for entry in criteria_payload:
+        if not isinstance(entry, dict):
+            raise ValueError("llm score payload criteria entry must be an object")
+        name = str(entry.get("name") or entry.get("key") or "").strip()
+        if name not in rubric_by_name:
+            raise ValueError(f"unknown rubric criterion: {name}")
+        rubric_item = rubric_by_name[name]
+        criteria.append(
+            ScoreCriterion(
+                key=str(entry.get("key") or item_by_key[name]),
+                name=rubric_item.name,
+                score=round(parse_score_value(entry.get("score", 0)), 2),
+                max_score=rubric_item.max_score,
+                standards=rubric_item.standards,
+                evidence=parse_string_list(entry.get("evidence", [])),
+                deductions=parse_string_list(entry.get("deductions", [])),
+                suggestions=parse_string_list(entry.get("suggestions", [])),
+            )
+        )
+    if len(criteria) != len(rubric_items):
+        raise ValueError("llm score payload must include six criteria")
+    return criteria
+
+
+def parse_string_list(value: Any) -> list[str]:
+    """Parse a JSON value into a compact string list."""
+
+    if value in (None, ""):
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def summarize_issues(issues: list[Issue]) -> list[dict[str, Any]]:
+    """Summarize local formatting issues for the LLM prompt."""
+
+    counts = Counter(issue.category for issue in issues)
+    samples = defaultdict(list)
+    for issue in issues[:20]:
+        samples[issue.category].append(
+            {
+                "message": issue.message,
+                "suggestion": issue.suggestion,
+                "section": issue.section_title,
+            }
+        )
+    return [
+        {
+            "category": category,
+            "count": count,
+            "samples": samples.get(category, []),
+        }
+        for category, count in counts.items()
+    ]
 
 
 def score_topic_workload(
@@ -463,6 +727,17 @@ def normalize_rubric_payload(payload: Any) -> list[RubricItem]:
     )
 
 
+def parse_rubric_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a single rubric item payload."""
+
+    return {
+        "criterion": item.get("criterion", ""),
+        "score": item.get("score", 0),
+        "standard": item.get("standard", item.get("standards", [])),
+        "evaluation": item.get("evaluation", item.get("评价方法", "llm")),
+    }
+
+
 def normalize_rubric_items(
     items: list[dict[str, Any]], *, require_all: bool = True
 ) -> list[RubricItem]:
@@ -472,6 +747,7 @@ def normalize_rubric_items(
         RubricItem(
             name=normalize_criterion_name(item.get("criterion", "")),
             standards=parse_standards(item.get("standard", item.get("standards", []))),
+            evaluation=str(item.get("evaluation", "")).strip() or "llm",
             max_score=parse_score_value(item.get("score", 0)),
         )
         for item in items
@@ -502,13 +778,15 @@ def parse_rubric_value(value: Any) -> dict[str, Any]:
     """Parse either flat score values or nested standard-score objects."""
 
     if isinstance(value, int | float) and not isinstance(value, bool):
-        return {"score": float(value), "standard": []}
+        return {"score": float(value), "standard": [], "evaluation": "llm"}
     if isinstance(value, dict):
         score = value.get("score", value.get("分数"))
         standard = value.get("standard", value.get("standards", value.get("标准", [])))
         return {
             "score": parse_score_value(score),
             "standard": parse_standards(standard),
+            "evaluation": str(value.get("evaluation", value.get("评价方法", "llm"))).strip()
+            or "llm",
         }
     msg = "score rubric item must be numeric or an object with score"
     raise ValueError(msg)
