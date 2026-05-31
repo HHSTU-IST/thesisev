@@ -45,11 +45,14 @@ class LocalIssueGroups:
         return [*self.format_issues, *self.writing_issues]
 
 
-def build_statistics(document: ThesisDocument) -> list[Statistic]:
+def build_statistics(
+    document: ThesisDocument, *, topic_analysis: dict[str, object] | None = None
+) -> list[Statistic]:
     """Build human-readable statistics for the thesis."""
 
     annotate_section_statistics(document)
-    topic_analysis = annotate_topic_relevance(document)
+    if topic_analysis is None:
+        topic_analysis = annotate_topic_relevance(document)
     statistics = [
         Statistic(label="篇幅", value=str(document.total_word_count)),
         Statistic(label="章节数", value=str(len(document.sections))),

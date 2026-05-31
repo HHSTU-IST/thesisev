@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from thesisev.analyzers import (
+    annotate_report_topic_relevance,
     annotate_section_statistics,
     annotate_topic_relevance,
     build_statistics,
@@ -669,6 +670,21 @@ def run_api() -> None:
     uvicorn.run("thesisev.api:app", host="127.0.0.1", port=8000, reload=False)
 
 
+def build_topic_analysis(
+    document: ThesisDocument,
+    *,
+    rubric_filename: str,
+    rubric: dict[str, Any] | None,
+) -> dict[str, object]:
+    """Build topic analysis using report rubric standards when available."""
+
+    if rubric_filename.startswith("score_report_") and rubric is not None:
+        topic_analysis = annotate_report_topic_relevance(document, rubric["items"])
+        topic_analysis["source"] = rubric_filename
+        return topic_analysis
+    return annotate_topic_relevance(document)
+
+
 def evaluate_document(
     path: str | Path,
     *,
@@ -686,8 +702,12 @@ def evaluate_document(
 
     document = load_document(path)
     annotate_section_statistics(document)
-    topic_analysis = annotate_topic_relevance(document)
-    statistics = build_statistics(document)
+    topic_analysis = build_topic_analysis(
+        document,
+        rubric_filename=rubric_filename,
+        rubric=rubric,
+    )
+    statistics = build_statistics(document, topic_analysis=topic_analysis)
     issue_groups = detect_issue_groups(document)
     format_issues = issue_groups.format_issues
     writing_issues = issue_groups.writing_issues
