@@ -352,7 +352,11 @@ def annotate_report_topic_relevance(
         paragraph.topic_relevance_score = 0.0
         paragraph.topic_matched_keywords = []
         paragraph.topic_is_relevant = False
-    for section in document.sections:
+    for paragraph in collect_report_section_paragraphs(document.sections):
+        paragraph.topic_relevance_score = 0.0
+        paragraph.topic_matched_keywords = []
+        paragraph.topic_is_relevant = False
+    for section in collect_report_sections(document.sections):
         section.topic_relevance_score = 0.0
         section.topic_relevant_word_count = 0
         section.topic_matched_keywords = []
@@ -502,7 +506,6 @@ def annotate_report_section_topic_relevance(
 
     matched_keywords: set[str] = set()
     relevant_word_count = 0
-    weighted_score = 0.0
     for paragraph in section.paragraphs:
         paragraph_matches = [
             keyword
@@ -517,7 +520,6 @@ def annotate_report_section_topic_relevance(
         if paragraph.topic_is_relevant:
             relevant_word_count += paragraph.word_count
         matched_keywords.update(paragraph_matches)
-        weighted_score += paragraph.topic_relevance_score * paragraph.word_count
 
     for child in section.children:
         annotate_report_section_topic_relevance(child, topic_keywords)
@@ -527,12 +529,24 @@ def annotate_report_section_topic_relevance(
     section.topic_relevance_score = (
         coverage_ratio
         if coverage_ratio is not None
-        else round(weighted_score / max(section.word_count, 1), 4)
+        else calculate_report_subtree_topic_relevance_score(section)
     )
     section.topic_relevant_word_count = relevant_word_count
     section.topic_matched_keywords = [
         keyword for keyword in topic_keywords if keyword in matched_keywords
     ]
+
+
+def calculate_report_subtree_topic_relevance_score(section: Section) -> float:
+    """Calculate paragraph-weighted report relevance for one section subtree."""
+
+    paragraphs = collect_report_section_paragraphs([section])
+    weighted_score = sum(
+        paragraph.topic_relevance_score * paragraph.word_count
+        for paragraph in paragraphs
+    )
+    word_count = sum(paragraph.word_count for paragraph in paragraphs)
+    return round(weighted_score / max(word_count, 1), 4)
 
 
 def collect_report_sections(sections: list[Section]) -> list[Section]:
@@ -580,13 +594,15 @@ def mirror_report_paragraph_annotations(document: ThesisDocument) -> None:
         sources_by_text[paragraph.text].append(paragraph)
 
     consumed: set[int] = set()
-    for paragraph in document.paragraphs:
+    for paragraph in reversed(document.paragraphs):
         source = source_by_identity.get(id(paragraph))
         if source is None:
             source = next(
                 (
                     candidate
-                    for candidate in sources_by_key[(paragraph.index, paragraph.text)]
+                    for candidate in reversed(
+                        sources_by_key[(paragraph.index, paragraph.text)]
+                    )
                     if id(candidate) not in consumed
                 ),
                 None,
@@ -595,7 +611,7 @@ def mirror_report_paragraph_annotations(document: ThesisDocument) -> None:
             source = next(
                 (
                     candidate
-                    for candidate in sources_by_text[paragraph.text]
+                    for candidate in reversed(sources_by_text[paragraph.text])
                     if id(candidate) not in consumed
                 ),
                 None,
