@@ -53,18 +53,28 @@ def build_statistics(
     annotate_section_statistics(document)
     if topic_analysis is None:
         topic_analysis = annotate_topic_relevance(document)
-    statistics = [
-        Statistic(label="篇幅", value=str(document.total_word_count)),
-        Statistic(label="章节数", value=str(len(document.sections))),
-        Statistic(label="段落数", value=str(len(document.paragraphs))),
-        Statistic(label="句子数", value=str(len(document.sentences))),
-        Statistic(
+    if "earned_score" in topic_analysis and "total_score" in topic_analysis:
+        topic_statistic = Statistic(
+            label="主题相关度评分",
+            value=(
+                f"{topic_analysis['document_ratio'] * 100:.1f}% "
+                f"({topic_analysis['earned_score']}/{topic_analysis['total_score']})"
+            ),
+        )
+    else:
+        topic_statistic = Statistic(
             label="主题相关内容占比",
             value=(
                 f"{topic_analysis['document_ratio'] * 100:.1f}% "
                 f"({topic_analysis['relevant_word_count']}/{document.total_word_count})"
             ),
-        ),
+        )
+    statistics = [
+        Statistic(label="篇幅", value=str(document.total_word_count)),
+        Statistic(label="章节数", value=str(len(document.sections))),
+        Statistic(label="段落数", value=str(len(document.paragraphs))),
+        Statistic(label="句子数", value=str(len(document.sentences))),
+        topic_statistic,
     ]
     for section in document.root_sections:
         statistics.append(

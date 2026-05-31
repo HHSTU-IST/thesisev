@@ -678,8 +678,17 @@ def build_topic_analysis(
 ) -> dict[str, object]:
     """Build topic analysis using report rubric standards when available."""
 
-    if rubric_filename.startswith("score_report_") and rubric is not None:
-        topic_analysis = annotate_report_topic_relevance(document, rubric["items"])
+    if rubric_filename.startswith("score_report_"):
+        report_rubric = (
+            rubric
+            if rubric is not None
+            else load_builtin_rubric_summary(rubric_filename)
+        )
+        rubric_items = report_rubric.get("items")
+        if not isinstance(rubric_items, list) or not rubric_items:
+            msg = "report rubric items must be a non-empty list"
+            raise ValueError(msg)
+        topic_analysis = annotate_report_topic_relevance(document, rubric_items)
         topic_analysis["source"] = rubric_filename
         return topic_analysis
     return annotate_topic_relevance(document)
@@ -701,7 +710,6 @@ def evaluate_document(
     """Evaluate a thesis document from a local path."""
 
     document = load_document(path)
-    annotate_section_statistics(document)
     topic_analysis = build_topic_analysis(
         document,
         rubric_filename=rubric_filename,
