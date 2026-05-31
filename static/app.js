@@ -114,20 +114,12 @@ function renderResults() {
   const roles = data.metadata?.evaluation_roles || {};
   renderModelMeta(modelMeta, scoreSource, commentSource, roles);
 
-  renderStatistics(data.statistics);
   renderScoreDetail(data.metadata?.score_detail || null);
   renderIssueFilters(data.issues);
   renderIssues(data.issues);
   renderTechList("software-tech-list", data.software_technology_stack || []);
   renderTechList("hardware-tech-list", data.hardware_technology_stack || []);
   renderSectionTree(data.document.root_sections);
-}
-
-function renderStatistics(statistics) {
-  renderTextList(
-    "statistics-list",
-    statistics.map((item) => `${item.label}: ${item.value}`),
-  );
 }
 
 function renderScoreDetail(scoreDetail) {
@@ -322,7 +314,9 @@ function buildSectionNode(section) {
   const title = document.createElement("strong");
   title.textContent = `${section.identifier} ${section.title}`;
   const summary = document.createElement("span");
-  summary.textContent = `${(section.ratio * 100).toFixed(1)}% / ${section.word_count} 字`;
+  summary.textContent =
+    `内容占比 ${(section.ratio * 100).toFixed(1)}% / ` +
+    `${section.subtree_word_count} 字`;
   header.appendChild(title);
   header.appendChild(summary);
 
@@ -330,7 +324,7 @@ function buildSectionNode(section) {
   meta.className = "tree-meta";
   meta.textContent =
     `层级 L${section.level} · 段落 ${section.paragraphs.length} · ` +
-    `主题相关 ${(section.topic_relevance_score * 100).toFixed(1)}%`;
+    `主题相关度 ${(section.topic_relevance_score * 100).toFixed(1)}%`;
 
   button.appendChild(header);
   button.appendChild(meta);
