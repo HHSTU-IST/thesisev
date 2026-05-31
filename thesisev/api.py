@@ -25,6 +25,7 @@ from thesisev.analyzers import (
     extract_keywords,
     extract_technology_details,
     extract_technology_stack,
+    split_technology_stack,
 )
 from thesisev.commentary import generate_comment
 from thesisev.llm import ModelConfig, build_model_config
@@ -694,6 +695,7 @@ def evaluate_document(
     keywords = extract_keywords(document)
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
+    technology_groups = split_technology_stack(technology_details)
     content_context = build_content_context(
         document=document,
         topic_analysis=topic_analysis,
@@ -739,6 +741,8 @@ def evaluate_document(
         content_context=content_context,
         keywords=keywords,
         technology_stack=technology_stack,
+        software_technology_stack=technology_groups["software_technology_stack"],
+        hardware_technology_stack=technology_groups["hardware_technology_stack"],
         technology_details=technology_details,
         topic_keywords=topic_analysis["topic_keywords"],
         topic_relevance_ratio=topic_analysis["document_ratio"],

@@ -136,5 +136,71 @@
       "Flask",
       "flask"
     ]
+  },
+  {
+    "name": "OpenCV",
+    "category": "图像处理",
+    "aliases": [
+      "OpenCV",
+      "opencv"
+    ]
+  },
+  {
+    "name": "TensorRT",
+    "category": "推理框架",
+    "aliases": [
+      "TensorRT",
+      "tensorrt"
+    ]
+  },
+  {
+    "name": "MQTT",
+    "category": "通信协议",
+    "aliases": [
+      "MQTT",
+      "mqtt"
+    ]
+  },
+  {
+    "name": "Jetson Nano",
+    "category": "hardware",
+    "aliases": [
+      "Jetson Nano",
+      "jetson nano"
+    ]
+  },
+  {
+    "name": "树莓派",
+    "category": "hardware",
+    "aliases": [
+      "树莓派",
+      "Raspberry Pi",
+      "raspberry pi"
+    ]
+  },
+  {
+    "name": "RK3588",
+    "category": "hardware",
+    "aliases": [
+      "RK3588",
+      "rk3588"
+    ]
+  },
+  {
+    "name": "V853",
+    "category": "hardware",
+    "aliases": [
+      "V853",
+      "v853"
+    ]
+  },
+  {
+    "name": "摄像头",
+    "category": "device",
+    "aliases": [
+      "摄像头",
+      "Camera Module",
+      "camera module"
+    ]
   }
 ]

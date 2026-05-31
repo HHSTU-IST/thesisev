@@ -150,6 +150,8 @@ class EvaluationResult:
     format_issues: list[Issue] = field(default_factory=list)
     writing_issues: list[Issue] = field(default_factory=list)
     content_context: dict[str, Any] = field(default_factory=dict)
+    software_technology_stack: list[str] = field(default_factory=list)
+    hardware_technology_stack: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the evaluation result to a JSON-friendly dictionary."""
@@ -163,6 +165,8 @@ class EvaluationResult:
             "content_context": self.content_context,
             "keywords": self.keywords,
             "technology_stack": self.technology_stack,
+            "software_technology_stack": self.software_technology_stack,
+            "hardware_technology_stack": self.hardware_technology_stack,
             "technology_details": [
                 asdict(technology_item) for technology_item in self.technology_details
             ],

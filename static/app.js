@@ -118,7 +118,8 @@ function renderResults() {
   renderScoreDetail(data.metadata?.score_detail || null);
   renderIssueFilters(data.issues);
   renderIssues(data.issues);
-  renderTechList(data.technology_stack);
+  renderTechList("software-tech-list", data.software_technology_stack || []);
+  renderTechList("hardware-tech-list", data.hardware_technology_stack || []);
   renderSectionTree(data.document.root_sections);
 }
 
@@ -281,10 +282,10 @@ function buildIssueKey(issue) {
   ].join("::");
 }
 
-function renderTechList(technologyStack) {
+function renderTechList(elementId, technologyStack) {
   renderTextList(
-    "tech-list",
-    technologyStack.length ? technologyStack : ["未识别到明确技术栈"],
+    elementId,
+    technologyStack.length ? technologyStack : ["无"],
   );
 }
 
@@ -461,9 +462,12 @@ function buildMarkdown(data) {
       )
       .join("\n")
     : "- 未检测到明显问题";
-  const tech = data.technology_stack.length
-    ? data.technology_stack.map((item) => `- ${item}`).join("\n")
-    : "- 未识别到明确技术栈";
+  const softwareTech = buildTechnologyStackMarkdown(
+    data.software_technology_stack || [],
+  );
+  const hardwareTech = buildTechnologyStackMarkdown(
+    data.hardware_technology_stack || [],
+  );
   const scoreDetail = buildScoreDetailMarkdown(data.metadata?.score_detail || null);
   const formatRequirements = buildFormatRequirementsMarkdown(
     data.metadata?.format_requirements || null,
@@ -495,14 +499,24 @@ function buildMarkdown(data) {
     "",
     issues,
     "",
-    "## 技术栈",
+    "## 软件技术栈",
     "",
-    tech,
+    softwareTech,
+    "",
+    "## 硬件技术栈",
+    "",
+    hardwareTech,
     "",
     "## 格式要求",
     "",
     formatRequirements,
   ].join("\n");
+}
+
+function buildTechnologyStackMarkdown(technologyStack) {
+  return technologyStack.length
+    ? technologyStack.map((item) => `- ${item}`).join("\n")
+    : "- 无";
 }
 
 function buildScoreDetailMarkdown(scoreDetail) {

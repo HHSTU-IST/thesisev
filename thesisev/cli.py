@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from thesisev.analyzers import group_technology_stack
+from thesisev.analyzers import split_technology_stack
 from thesisev.api import evaluate_document, structure_document
 
 
@@ -106,12 +106,8 @@ def print_report(result) -> None:
     print(f"- {result.topic_relevance_ratio * 100:.1f}%")
     print()
     print("Technology Stack:")
-    if not result.technology_details:
-        print("- None")
-    else:
-        grouped = group_technology_stack(result.technology_details)
-        for category, names in grouped.items():
-            print(f"- {category}: {'、'.join(names)}")
+    for line in build_technology_stack_lines(result.technology_details):
+        print(line)
     print()
     print(f"Score: {result.score}")
     print("Content Evaluation:")
@@ -137,6 +133,15 @@ def print_report(result) -> None:
             f"  Suggestion: {issue.suggestion}\n"
             f"  Excerpt: {issue.excerpt}"
         )
+
+
+def build_technology_stack_lines(technology_details) -> list[str]:
+    """Build software and hardware technology-stack lines for the CLI."""
+
+    grouped = split_technology_stack(technology_details)
+    software = "、".join(grouped["software_technology_stack"]) or "无"
+    hardware = "、".join(grouped["hardware_technology_stack"]) or "无"
+    return [f"- 软件技术栈: {software}", f"- 硬件技术栈: {hardware}"]
 
 
 def print_structure(document) -> None:

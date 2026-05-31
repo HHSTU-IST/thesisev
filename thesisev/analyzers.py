@@ -435,6 +435,39 @@ def group_technology_stack(
     return dict(sorted(grouped.items()))
 
 
+def split_technology_stack(
+    technology_details: list[TechnologyStackItem],
+) -> dict[str, list[str]]:
+    """Split display technologies into software and hardware groups."""
+
+    software_categories = {
+        "software",
+        "platform",
+        "Web 框架",
+        "向量检索",
+        "图像处理",
+        "工程基础设施",
+        "推理框架",
+        "数据库",
+        "数据处理",
+        "机器学习框架",
+        "模型平台",
+        "模型框架",
+        "编程语言",
+        "通信协议",
+    }
+    grouped = {
+        "software_technology_stack": [],
+        "hardware_technology_stack": [],
+    }
+    for item in technology_details:
+        if item.category in software_categories:
+            grouped["software_technology_stack"].append(item.name)
+        elif item.category in {"hardware", "device"}:
+            grouped["hardware_technology_stack"].append(item.name)
+    return grouped
+
+
 def tokenize(text: str) -> list[str]:
     """Tokenize mixed Chinese and Latin text with light filtering."""
 
