@@ -357,7 +357,9 @@ def annotate_report_topic_relevance(
         )
         max_score = float(rubric_item.get("score", rubric_item.get("max_score", 0)))
         total_score += max_score
-        standard_keywords = [extract_standard_keywords(standard) for standard in standards]
+        standard_keywords = [
+            extract_standard_keywords(standard) for standard in standards
+        ]
         section_keywords = deduplicate_preserving_order(
             [keyword for keywords in standard_keywords for keyword in keywords]
         )
@@ -379,7 +381,9 @@ def annotate_report_topic_relevance(
         coverage_ratio = round(
             covered_standard_count / max(len(standard_keywords), 1), 4
         )
-        annotate_report_section_topic_relevance(section, section_keywords, coverage_ratio)
+        annotate_report_section_topic_relevance(
+            section, section_keywords, coverage_ratio
+        )
         earned_score += max_score * coverage_ratio
 
     relevant_word_count = sum(
