@@ -1216,12 +1216,16 @@ REPORT_STANDARD_GENERIC_TERMS = {
     "当前",
     "所选",
     "指标",
+    "应用",
+    "技术",
+    "发展",
     "时",
     "重点使用",
     "阐述",
     "需要",
     "相关",
     "现有",
+    "风险",
 }
 
 REPORT_STANDARD_GENERIC_PREFIXES = (
