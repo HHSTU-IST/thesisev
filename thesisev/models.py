@@ -147,6 +147,9 @@ class EvaluationResult:
     comment: str
     comment_checks: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    format_issues: list[Issue] = field(default_factory=list)
+    writing_issues: list[Issue] = field(default_factory=list)
+    content_context: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the evaluation result to a JSON-friendly dictionary."""
@@ -155,6 +158,9 @@ class EvaluationResult:
             "document": self.document.to_dict(),
             "statistics": [asdict(statistic) for statistic in self.statistics],
             "issues": [asdict(issue) for issue in self.issues],
+            "format_issues": [asdict(issue) for issue in self.format_issues],
+            "writing_issues": [asdict(issue) for issue in self.writing_issues],
+            "content_context": self.content_context,
             "keywords": self.keywords,
             "technology_stack": self.technology_stack,
             "technology_details": [

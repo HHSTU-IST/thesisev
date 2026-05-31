@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
-from defusedxml import ElementTree
+from docx import Document as load_docx_document
+from docx.opc.exceptions import PackageNotFoundError
 
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
 
@@ -26,25 +27,16 @@ SECTION_PATTERN = re.compile(
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
 MERMAID_FENCE_PATTERN = re.compile(r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$")
-WORD_NAMESPACE = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-DOCX_DOCUMENT_XML = "word/document.xml"
-DOCX_STYLES_XML = "word/styles.xml"
 MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
 MAX_DOCX_MEMBER_COUNT = 512
 MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
 MAX_DOCX_MEMBER_BYTES = 30 * 1024 * 1024
-MAX_DOCX_DOCUMENT_XML_BYTES = 10 * 1024 * 1024
-MAX_DOCX_STYLES_XML_BYTES = 2 * 1024 * 1024
 MAX_DOCX_COMPRESSION_RATIO = 100
-MAX_DOCX_XML_ELEMENTS = 200000
 MAX_DOCX_TEXT_PARAGRAPHS = 5000
-MAX_DOCX_TEXT_NODES = 100000
 MAX_DOCX_SNAPSHOT_PARAGRAPHS = 5000
 MAX_DOCX_SNAPSHOT_TABLES = 500
 MAX_DOCX_SNAPSHOT_SECTIONS = 200
 MAX_DOCX_RUNS_PER_PARAGRAPH = 500
-MAX_DOCX_TEXT_NODES_PER_RUN = 200
-ZIP_READ_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -63,21 +55,22 @@ def load_document(path: str | Path) -> ThesisDocument:
 
     source_path = Path(path)
     if source_path.suffix.lower() == ".docx":
-        document_xml = read_docx_document_xml(source_path)
-        styles_xml = read_docx_styles_xml(source_path)
-        style_name_map = read_docx_style_map_from_xml(styles_xml)
-        raw_text = read_docx_text_from_xml(document_xml)
-        format_snapshot = read_docx_format_snapshot_from_xml(
-            document_xml, style_map=style_name_map
-        )
+        docx_document = open_docx_document(source_path)
+        raw_text = read_docx_text_from_document(docx_document)
+        format_snapshot = read_docx_format_snapshot_from_document(docx_document)
+        cleaned_text = clean_text(raw_text)
+        lines = [line.strip() for line in cleaned_text.splitlines()]
+        title = next((line for line in lines if line), source_path.stem)
+        body_text = remove_title_from_text(cleaned_text, title)
+        front_matter, sections = parse_sections(body_text)
     else:
         raw_text = read_source_text(source_path)
         format_snapshot = {}
-    cleaned_text = clean_text(raw_text)
-    lines = [line.strip() for line in cleaned_text.splitlines()]
-    title = next((line for line in lines if line), source_path.stem)
-    body_text = remove_title_from_text(cleaned_text, title)
-    front_matter, sections = parse_sections(body_text)
+        cleaned_text = clean_text(raw_text)
+        lines = [line.strip() for line in cleaned_text.splitlines()]
+        title = next((line for line in lines if line), source_path.stem)
+        body_text = remove_title_from_text(cleaned_text, title)
+        front_matter, sections = parse_sections(body_text)
     root_sections = build_section_tree(sections)
     paragraphs = collect_document_paragraphs(front_matter, sections)
     sentences = flatten_sentence_text(paragraphs)
@@ -117,83 +110,61 @@ def read_source_text(path: Path) -> str:
 
 
 def read_docx_text(path: Path) -> str:
-    """Extract plain text from a docx file using the OpenXML document body."""
+    """Extract plain text from a docx file using python-docx."""
 
-    return read_docx_text_from_xml(read_docx_document_xml(path))
+    return read_docx_text_from_document(open_docx_document(path))
 
 
-def read_docx_text_from_xml(xml_bytes: bytes) -> str:
-    """Extract plain text from an already validated document.xml payload."""
+def read_docx_text_from_document(document: Any) -> str:
+    """Extract plain text from a python-docx document object."""
 
-    root = ElementTree.fromstring(xml_bytes)
-    validate_docx_xml_element_count(root)
     paragraphs: list[str] = []
-    text_node_count = 0
-    for paragraph in iter_limited(
-        root, "p", max_items=MAX_DOCX_TEXT_PARAGRAPHS, label="paragraphs"
-    ):
-        run_texts: list[str] = []
-        for text_node in iter_limited(
-            paragraph,
-            "t",
-            max_items=MAX_DOCX_TEXT_NODES_PER_RUN * MAX_DOCX_RUNS_PER_PARAGRAPH,
-            label="text nodes per paragraph",
-        ):
-            text_node_count += 1
-            if text_node_count > MAX_DOCX_TEXT_NODES:
-                raise_docx_traversal_limit("text nodes", MAX_DOCX_TEXT_NODES)
-            run_texts.append(text_node.text or "")
-        text = "".join(run_texts).strip()
-        if text:
-            paragraphs.append(text)
+    for index, paragraph in enumerate(iter_docx_paragraphs(document), start=1):
+        if index > MAX_DOCX_TEXT_PARAGRAPHS:
+            raise_docx_traversal_limit("paragraphs", MAX_DOCX_TEXT_PARAGRAPHS)
+        text = normalize_docx_paragraph_text(getattr(paragraph, "text", ""))
+        if not text:
+            continue
+        if len(getattr(paragraph, "runs", [])) > MAX_DOCX_RUNS_PER_PARAGRAPH:
+            raise_docx_traversal_limit(
+                "runs per paragraph", MAX_DOCX_RUNS_PER_PARAGRAPH
+            )
+        paragraphs.append(text)
     return "\n\n".join(paragraphs)
 
 
 def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
     """Extract a compact formatting snapshot from a docx file."""
 
-    document_xml = read_docx_document_xml(path)
-    styles_xml = read_docx_styles_xml(path)
-    style_map = read_docx_style_map_from_xml(styles_xml)
-    return read_docx_format_snapshot_from_xml(
-        document_xml, style_map=style_map
-    )
+    return read_docx_format_snapshot_from_document(open_docx_document(path))
 
 
-def read_docx_format_snapshot_from_xml(
-    xml_bytes: bytes, style_map: dict[str, dict[str, Any]] | None = None
-) -> dict[str, Any]:
-    """Extract a compact formatting snapshot from validated document.xml bytes."""
+def read_docx_format_snapshot_from_document(document: Any) -> dict[str, Any]:
+    """Extract a compact formatting snapshot from a python-docx document."""
 
-    document_xml = ElementTree.fromstring(xml_bytes)
-    validate_docx_xml_element_count(document_xml)
-
+    style_map = build_docx_style_map(document)
     paragraphs: list[dict[str, Any]] = []
-    tables = [
-        extract_docx_table_snapshot(table)
-        for table in iter_limited(
-            document_xml, "tbl", max_items=MAX_DOCX_SNAPSHOT_TABLES, label="tables"
-        )
-    ]
-    sections = [
-        extract_docx_section_snapshot(sect_pr)
-        for sect_pr in iter_limited(
-            document_xml,
-            "sectPr",
-            max_items=MAX_DOCX_SNAPSHOT_SECTIONS,
-            label="sections",
-        )
-    ]
+    tables: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
 
-    for paragraph in iter_limited(
-        document_xml,
-        "p",
-        max_items=MAX_DOCX_SNAPSHOT_PARAGRAPHS,
-        label="paragraph snapshots",
-    ):
+    for index, paragraph in enumerate(iter_docx_paragraphs(document), start=1):
+        if index > MAX_DOCX_SNAPSHOT_PARAGRAPHS:
+            raise_docx_traversal_limit(
+                "paragraph snapshots", MAX_DOCX_SNAPSHOT_PARAGRAPHS
+            )
         snapshot = extract_docx_paragraph_snapshot(paragraph, style_map=style_map)
         if snapshot["text"] or snapshot["style"] or snapshot["runs"]:
             paragraphs.append(snapshot)
+
+    for index, table in enumerate(iter_docx_tables(document), start=1):
+        if index > MAX_DOCX_SNAPSHOT_TABLES:
+            raise_docx_traversal_limit("tables", MAX_DOCX_SNAPSHOT_TABLES)
+        tables.append(extract_docx_table_snapshot(table))
+
+    for index, section in enumerate(getattr(document, "sections", []), start=1):
+        if index > MAX_DOCX_SNAPSHOT_SECTIONS:
+            raise_docx_traversal_limit("sections", MAX_DOCX_SNAPSHOT_SECTIONS)
+        sections.append(extract_docx_section_snapshot(section))
 
     if not sections:
         sections.append({})
@@ -201,38 +172,221 @@ def read_docx_format_snapshot_from_xml(
     return {"paragraphs": paragraphs, "tables": tables, "sections": sections}
 
 
-def read_docx_document_xml(path: Path) -> bytes:
-    """Safely read the main DOCX XML member with size limits."""
+def parse_docx_sections(document: Any) -> tuple[str, list[Section]]:
+    """Parse section structure from a python-docx document."""
 
-    return read_docx_member_xml(
-        path, DOCX_DOCUMENT_XML, max_size=MAX_DOCX_DOCUMENT_XML_BYTES
-    )
+    lines: list[str] = []
+    headings: list[HeadingMatch] = []
+    front_matter_lines: list[str] = []
+    current_section_index = -1
+
+    for paragraph in iter_docx_paragraphs(document):
+        paragraph_text = normalize_docx_paragraph_text(paragraph.text)
+        if not paragraph_text:
+            continue
+        lines.append(paragraph_text)
+        heading = match_docx_paragraph_heading(paragraph, paragraph_text)
+        if heading is not None:
+            current_section_index += 1
+            headings.append(
+                HeadingMatch(
+                    line_index=len(lines) - 1,
+                    level=heading[0],
+                    title=heading[1],
+                    numbering=heading[2],
+                    heading=heading[3],
+                )
+            )
+        elif current_section_index < 0:
+            front_matter_lines.append(paragraph_text)
+
+    if not headings:
+        msg = "docx file must contain explicit heading markers"
+        raise ValueError(msg)
+
+    front_matter = "\n".join(front_matter_lines).strip()
+    sections: list[Section] = []
+    for position, heading in enumerate(headings):
+        start_index = heading.line_index + 1
+        end_index = len(lines)
+        if position + 1 < len(headings):
+            end_index = headings[position + 1].line_index
+        content = "\n".join(lines[start_index:end_index]).strip()
+        sections.append(
+            build_section(
+                identifier=str(position + 1),
+                level=heading.level,
+                title=heading.title,
+                heading=heading.heading,
+                numbering=heading.numbering,
+                content=content,
+            )
+        )
+    return front_matter, sections
 
 
-def read_docx_styles_xml(path: Path) -> bytes:
-    """Safely read the DOCX styles.xml member with size limits."""
-
-    return read_docx_member_xml(
-        path, DOCX_STYLES_XML, max_size=MAX_DOCX_STYLES_XML_BYTES
-    )
-
-
-def read_docx_member_xml(path: Path, member_name: str, *, max_size: int) -> bytes:
-    """Safely read a specific DOCX XML member with archive limits."""
+def open_docx_document(path: Path) -> Any:
+    """Open a DOCX file through python-docx after lightweight archive checks."""
 
     validate_docx_archive_size(path)
     try:
         with ZipFile(path) as archive:
             validate_docx_archive_members(archive)
-            member_info = archive.getinfo(member_name)
-            validate_docx_member_size(member_info, max_size=max_size)
-            return read_zip_member_limited(archive, member_info, max_size=max_size)
+            validate_docx_member_size(
+                get_docx_document_xml_info(archive),
+                max_size=MAX_DOCX_MEMBER_BYTES,
+            )
+            if "word/styles.xml" in archive.namelist():
+                validate_docx_member_size(
+                    archive.getinfo("word/styles.xml"),
+                    max_size=MAX_DOCX_MEMBER_BYTES,
+                )
     except BadZipFile as exc:
         msg = "invalid docx archive"
         raise ValueError(msg) from exc
-    except KeyError as exc:
-        msg = f"docx archive is missing {member_name}"
+    try:
+        return load_docx_document(str(path))
+    except (BadZipFile, PackageNotFoundError) as exc:
+        msg = "invalid docx document"
         raise ValueError(msg) from exc
+
+
+def iter_docx_paragraphs(document: Any):
+    """Iterate over document paragraphs in reading order."""
+
+    if hasattr(document, "paragraphs"):
+        yield from document.paragraphs
+    if hasattr(document, "tables"):
+        for table in document.tables:
+            yield from iter_docx_table_paragraphs(table)
+
+
+def iter_docx_table_paragraphs(table: Any):
+    """Iterate paragraphs from a table and its nested cells."""
+
+    for row in getattr(table, "rows", []):
+        for cell in getattr(row, "cells", []):
+            yield from getattr(cell, "paragraphs", [])
+            for nested_table in getattr(cell, "tables", []):
+                yield from iter_docx_table_paragraphs(nested_table)
+
+
+def iter_docx_tables(document: Any):
+    """Iterate over all document tables."""
+
+    if hasattr(document, "tables"):
+        for table in document.tables:
+            yield table
+            yield from iter_docx_nested_tables(table)
+
+
+def iter_docx_nested_tables(table: Any):
+    """Iterate nested tables from a table."""
+
+    for row in getattr(table, "rows", []):
+        for cell in getattr(row, "cells", []):
+            for nested_table in getattr(cell, "tables", []):
+                yield nested_table
+                yield from iter_docx_nested_tables(nested_table)
+
+
+def iter_docx_runs(paragraph: Any):
+    """Iterate runs from a paragraph."""
+
+    yield from getattr(paragraph, "runs", [])
+
+
+def normalize_docx_paragraph_text(text: str) -> str:
+    """Normalize python-docx paragraph text for section parsing."""
+
+    normalized = (
+        (text or "").replace("\xa0", " ").replace("\r\n", "\n").replace("\r", "\n")
+    )
+    normalized = normalized.replace("\t", " ")
+    normalized = re.sub(r"[ ]+", " ", normalized)
+    return normalized.strip()
+
+
+def build_docx_style_map(document: Any) -> dict[str, dict[str, Any]]:
+    """Build a style snapshot map from a python-docx document."""
+
+    style_map: dict[str, dict[str, Any]] = {}
+    for style in getattr(document, "styles", []):
+        style_id = getattr(style, "style_id", None)
+        if not style_id:
+            continue
+        base_style = getattr(style, "base_style", None)
+        style_map[str(style_id)] = {
+            "name": normalize_docx_style_name(getattr(style, "name", None))
+            or getattr(style, "name", None),
+            "based_on": getattr(base_style, "style_id", None),
+            "font_name": getattr(getattr(style, "font", None), "name", None),
+            "font_size_pt": parse_docx_length(
+                getattr(getattr(style, "font", None), "size", None)
+            ),
+            "bold": getattr(getattr(style, "font", None), "bold", None),
+            "alignment": normalize_docx_alignment(
+                getattr(
+                    getattr(style.paragraph_format, "alignment", None), "name", None
+                )
+            )
+            if getattr(style, "paragraph_format", None) is not None
+            else None,
+            "line_spacing": parse_docx_line_spacing_from_style(style),
+            "space_before_pt": parse_docx_length(
+                getattr(getattr(style, "paragraph_format", None), "space_before", None)
+            ),
+            "space_after_pt": parse_docx_length(
+                getattr(getattr(style, "paragraph_format", None), "space_after", None)
+            ),
+            "first_line_indent_pt": parse_docx_length(
+                getattr(
+                    getattr(style, "paragraph_format", None), "first_line_indent", None
+                )
+            ),
+        }
+    return resolve_docx_style_map(style_map)
+
+
+def resolve_docx_style_map(
+    style_map: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Resolve inherited style properties in a style map."""
+
+    resolved: dict[str, dict[str, Any]] = {}
+
+    def resolve_style(style_id: str) -> dict[str, Any]:
+        if style_id in resolved:
+            return resolved[style_id]
+        style = style_map.get(style_id, {})
+        base_style_id = style.get("based_on")
+        base = resolve_style(base_style_id) if base_style_id else {}
+        merged = {
+            "name": style.get("name") or base.get("name"),
+            "based_on": base_style_id,
+            "font_name": style.get("font_name") or base.get("font_name"),
+            "font_size_pt": style.get("font_size_pt") or base.get("font_size_pt"),
+            "bold": style.get("bold")
+            if style.get("bold") is not None
+            else base.get("bold"),
+            "alignment": style.get("alignment") or base.get("alignment"),
+            "line_spacing": style.get("line_spacing") or base.get("line_spacing"),
+            "space_before_pt": style.get("space_before_pt")
+            if style.get("space_before_pt") is not None
+            else base.get("space_before_pt"),
+            "space_after_pt": style.get("space_after_pt")
+            if style.get("space_after_pt") is not None
+            else base.get("space_after_pt"),
+            "first_line_indent_pt": style.get("first_line_indent_pt")
+            if style.get("first_line_indent_pt") is not None
+            else base.get("first_line_indent_pt"),
+        }
+        resolved[style_id] = merged
+        return merged
+
+    for style_id in style_map:
+        resolve_style(style_id)
+    return resolved
 
 
 def validate_docx_archive_size(path: Path) -> None:
@@ -274,10 +428,17 @@ def get_docx_document_xml_info(archive: ZipFile) -> ZipInfo:
     """Return the central-directory entry for word/document.xml."""
 
     try:
-        return archive.getinfo(DOCX_DOCUMENT_XML)
+        return archive.getinfo("word/document.xml")
     except KeyError as exc:
         msg = "docx archive is missing word/document.xml"
         raise ValueError(msg) from exc
+
+
+def raise_docx_traversal_limit(label: str, max_items: int) -> None:
+    """Raise a consistent DOCX traversal-limit error."""
+
+    msg = f"docx document has too many {label}; maximum is {max_items}"
+    raise ValueError(msg)
 
 
 def validate_docx_member_size(member: ZipInfo, *, max_size: int) -> None:
@@ -299,71 +460,20 @@ def validate_docx_member_size(member: ZipInfo, *, max_size: int) -> None:
             raise ValueError(msg)
 
 
-def read_zip_member_limited(
-    archive: ZipFile, member: ZipInfo, *, max_size: int
-) -> bytes:
-    """Read a zip member in chunks while enforcing an output limit."""
-
-    chunks: list[bytes] = []
-    total_size = 0
-    with archive.open(member) as source:
-        while chunk := source.read(ZIP_READ_CHUNK_BYTES):
-            total_size += len(chunk)
-            if total_size > max_size:
-                msg = (
-                    f"docx member {member.filename} is too large; "
-                    f"maximum size is {max_size // (1024 * 1024)} MiB"
-                )
-                raise ValueError(msg)
-            chunks.append(chunk)
-    return b"".join(chunks)
-
-
-def iter_limited(
-    root: ElementTree.Element, local_name: str, *, max_items: int, label: str
-):
-    """Yield matching descendants while enforcing a traversal limit."""
-
-    count = 0
-    suffix = f"}}{local_name}"
-    for element in root.iter():
-        if element.tag.endswith(suffix):
-            count += 1
-            if count > max_items:
-                raise_docx_traversal_limit(label, max_items)
-            yield element
-
-
-def validate_docx_xml_element_count(root: ElementTree.Element) -> None:
-    """Reject XML documents with excessive element counts."""
-
-    for index, _element in enumerate(root.iter(), start=1):
-        if index > MAX_DOCX_XML_ELEMENTS:
-            raise_docx_traversal_limit("XML elements", MAX_DOCX_XML_ELEMENTS)
-
-
-def raise_docx_traversal_limit(label: str, max_items: int) -> None:
-    """Raise a consistent DOCX traversal-limit error."""
-
-    msg = f"docx document has too many {label}; maximum is {max_items}"
-    raise ValueError(msg)
-
-
 def extract_docx_paragraph_snapshot(
-    paragraph: ElementTree.Element, *, style_map: dict[str, dict[str, Any]] | None = None
+    paragraph: Any, *, style_map: dict[str, dict[str, Any]] | None = None
 ) -> dict[str, Any]:
     """Extract a paragraph-level formatting snapshot."""
 
-    paragraph_props = paragraph.find("w:pPr", WORD_NAMESPACE)
-    paragraph_style_id = get_docx_attr_value(paragraph_props, "pStyle")
+    paragraph_style_id = get_docx_paragraph_style_id(paragraph)
     style_snapshot = resolve_docx_style_snapshot(paragraph_style_id, style_map)
+    paragraph_format = getattr(paragraph, "paragraph_format", None)
     runs: list[dict[str, Any]] = []
-    for run in iter_limited(
-        paragraph,
-        "r",
-        max_items=MAX_DOCX_RUNS_PER_PARAGRAPH,
-        label="runs per paragraph",
-    ):
+    for index, run in enumerate(getattr(paragraph, "runs", []), start=1):
+        if index > MAX_DOCX_RUNS_PER_PARAGRAPH:
+            raise_docx_traversal_limit(
+                "runs per paragraph", MAX_DOCX_RUNS_PER_PARAGRAPH
+            )
         run_snapshot = extract_docx_run_snapshot(run, style_map=style_map)
         if run_snapshot["text"] or any(
             run_snapshot[key] is not None
@@ -371,7 +481,7 @@ def extract_docx_paragraph_snapshot(
         ):
             runs.append(run_snapshot)
 
-    text = "".join(run.get("text", "") for run in runs).strip()
+    text = normalize_docx_paragraph_text(getattr(paragraph, "text", ""))
     primary_run = next(
         (run for run in runs if run.get("text")), runs[0] if runs else {}
     )
@@ -379,25 +489,27 @@ def extract_docx_paragraph_snapshot(
         "text": text,
         "style": style_snapshot.get("name"),
         "style_id": paragraph_style_id,
-        "alignment": normalize_docx_alignment(
-            get_docx_attr_value(paragraph_props, "jc")
-        ),
-        "line_spacing": parse_docx_line_spacing(paragraph_props)
+        "alignment": paragraph_alignment_to_token(
+            getattr(paragraph_format, "alignment", None)
+        )
+        or style_snapshot.get("alignment"),
+        "line_spacing": parse_docx_line_spacing_from_paragraph(paragraph)
         or style_snapshot.get("line_spacing"),
-        "space_before_pt": parse_docx_twips(
-            get_docx_child(paragraph_props, "spacing"), "before"
+        "space_before_pt": parse_docx_length(
+            getattr(paragraph_format, "space_before", None)
         )
-        if get_docx_child(paragraph_props, "spacing") is not None
+        if paragraph_format is not None and paragraph_format.space_before is not None
         else style_snapshot.get("space_before_pt"),
-        "space_after_pt": parse_docx_twips(
-            get_docx_child(paragraph_props, "spacing"), "after"
+        "space_after_pt": parse_docx_length(
+            getattr(paragraph_format, "space_after", None)
         )
-        if get_docx_child(paragraph_props, "spacing") is not None
+        if paragraph_format is not None and paragraph_format.space_after is not None
         else style_snapshot.get("space_after_pt"),
-        "first_line_indent_pt": parse_docx_indentation(
-            get_docx_child(paragraph_props, "ind"), "firstLine"
+        "first_line_indent_pt": parse_docx_length(
+            getattr(paragraph_format, "first_line_indent", None)
         )
-        if get_docx_child(paragraph_props, "ind") is not None
+        if paragraph_format is not None
+        and paragraph_format.first_line_indent is not None
         else style_snapshot.get("first_line_indent_pt"),
         "runs": runs,
         "run": primary_run,
@@ -405,160 +517,114 @@ def extract_docx_paragraph_snapshot(
 
 
 def extract_docx_run_snapshot(
-    run: ElementTree.Element, *, style_map: dict[str, dict[str, Any]] | None = None
+    run: Any, *, style_map: dict[str, dict[str, Any]] | None = None
 ) -> dict[str, Any]:
     """Extract a run-level formatting snapshot."""
 
-    run_props = run.find("w:rPr", WORD_NAMESPACE)
-    text = "".join(
-        node.text or ""
-        for node in iter_limited(
-            run, "t", max_items=MAX_DOCX_TEXT_NODES_PER_RUN, label="text nodes per run"
-        )
-    ).strip()
+    run_style_snapshot = resolve_docx_run_style_snapshot(run, style_map)
     return {
-        "text": text,
-        "font_name": parse_docx_font_name(run_props)
-        or resolve_docx_run_style_snapshot(run, style_map).get("font_name"),
-        "font_size_pt": parse_docx_font_size(run_props)
-        or resolve_docx_run_style_snapshot(run, style_map).get("font_size_pt"),
-        "bold": parse_docx_bool(get_docx_child(run_props, "b")),
+        "text": normalize_docx_paragraph_text(getattr(run, "text", "")),
+        "font_name": getattr(getattr(run, "font", None), "name", None)
+        or run_style_snapshot.get("font_name"),
+        "font_size_pt": parse_docx_length(
+            getattr(getattr(run, "font", None), "size", None)
+        )
+        or run_style_snapshot.get("font_size_pt"),
+        "bold": getattr(getattr(run, "font", None), "bold", None),
     }
 
 
-def extract_docx_table_snapshot(table: ElementTree.Element) -> dict[str, Any]:
+def extract_docx_table_snapshot(table: Any) -> dict[str, Any]:
     """Extract a table-level formatting snapshot."""
 
-    table_props = table.find("w:tblPr", WORD_NAMESPACE)
     return {
-        "alignment": normalize_docx_alignment(get_docx_attr_value(table_props, "jc"))
+        "alignment": paragraph_alignment_to_token(getattr(table, "alignment", None))
     }
 
 
-def extract_docx_section_snapshot(section: ElementTree.Element) -> dict[str, Any]:
+def extract_docx_section_snapshot(section: Any) -> dict[str, Any]:
     """Extract a section-level formatting snapshot."""
 
-    margins = get_docx_child(section, "pgMar")
     return {
-        "top_margin_pt": parse_docx_twips(margins, "top"),
-        "bottom_margin_pt": parse_docx_twips(margins, "bottom"),
-        "left_margin_pt": parse_docx_twips(margins, "left"),
-        "right_margin_pt": parse_docx_twips(margins, "right"),
+        "top_margin_pt": parse_docx_length(getattr(section, "top_margin", None)),
+        "bottom_margin_pt": parse_docx_length(getattr(section, "bottom_margin", None)),
+        "left_margin_pt": parse_docx_length(getattr(section, "left_margin", None)),
+        "right_margin_pt": parse_docx_length(getattr(section, "right_margin", None)),
     }
 
 
-def get_docx_child(
-    parent: ElementTree.Element | None, name: str
-) -> ElementTree.Element | None:
-    """Return a child element by local name."""
+def get_docx_paragraph_style_id(paragraph: Any) -> str | None:
+    """Return a paragraph style id from python-docx objects."""
 
-    if parent is None:
+    style = getattr(paragraph, "style", None)
+    if style is None:
         return None
-    return parent.find(f"w:{name}", WORD_NAMESPACE)
-
-
-def get_docx_attr_value(parent: ElementTree.Element | None, name: str) -> str | None:
-    """Return the w:val attribute from a docx child element."""
-
-    child = get_docx_child(parent, name)
-    if child is None:
+    style_id = getattr(style, "style_id", None)
+    if style_id:
+        return str(style_id)
+    name = getattr(style, "name", None)
+    if not name:
         return None
-    value = child.get(f"{{{WORD_NAMESPACE['w']}}}val")
+    return normalize_docx_style_name(str(name))
+
+
+def parse_docx_length(value: Any) -> float | None:
+    """Convert a python-docx length object to points."""
+
     if value is None:
         return None
-    return value.strip()
-
-
-def parse_docx_bool(element: ElementTree.Element | None) -> bool | None:
-    """Parse a w:b-like boolean element."""
-
-    if element is None:
-        return None
-    value = element.get(f"{{{WORD_NAMESPACE['w']}}}val")
-    if value is None:
-        return True
-    return value not in {"0", "false", "off"}
-
-
-def parse_docx_font_name(run_props: ElementTree.Element | None) -> str | None:
-    """Parse the first usable font name from run properties."""
-
-    fonts = get_docx_child(run_props, "rFonts")
-    if fonts is None:
-        return None
-    for attr in ("eastAsia", "ascii", "hAnsi"):
-        value = fonts.get(f"{{{WORD_NAMESPACE['w']}}}{attr}")
-        if value:
-            return value.strip()
-    return None
-
-
-def parse_docx_font_size(run_props: ElementTree.Element | None) -> float | None:
-    """Parse run font size in points."""
-
-    size_element = get_docx_child(run_props, "sz")
-    if size_element is None:
-        return None
-    raw_value = size_element.get(f"{{{WORD_NAMESPACE['w']}}}val")
-    if not raw_value:
-        return None
     try:
-        return round(float(raw_value) / 2, 2)
-    except ValueError:
-        return None
+        return round(float(value.pt), 2)
+    except AttributeError:
+        try:
+            return round(float(value) / 12700, 2)
+        except (TypeError, ValueError):
+            return None
 
 
-def parse_docx_line_spacing(
-    paragraph_props: ElementTree.Element | None,
-) -> float | None:
-    """Parse paragraph line spacing into a float ratio when possible."""
+def resolve_docx_run_style_snapshot(
+    run: Any, style_map: dict[str, dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Resolve run style inheritance if direct properties are missing."""
 
-    spacing = get_docx_child(paragraph_props, "spacing")
-    if spacing is None:
+    style = getattr(run, "style", None)
+    style_id = getattr(style, "style_id", None) if style is not None else None
+    if not style_id and style is not None:
+        style_id = getattr(style, "name", None)
+    if not style_id:
+        return {}
+    return resolve_docx_style_snapshot(str(style_id), style_map)
+
+
+def parse_docx_line_spacing_from_paragraph(paragraph: Any) -> float | None:
+    """Read line spacing from a python-docx paragraph."""
+
+    paragraph_format = getattr(paragraph, "paragraph_format", None)
+    if paragraph_format is None:
         return None
-    line_rule = spacing.get(f"{{{WORD_NAMESPACE['w']}}}lineRule")
-    raw_value = spacing.get(f"{{{WORD_NAMESPACE['w']}}}line")
-    if not raw_value:
+    line_spacing = getattr(paragraph_format, "line_spacing", None)
+    if line_spacing is None:
         return None
+    if isinstance(line_spacing, (int, float)):
+        return round(float(line_spacing), 2)
     try:
-        numeric_value = float(raw_value)
-    except ValueError:
-        return None
-    if line_rule in {"auto", "autoSpacing"}:
-        return round(numeric_value / 240, 2)
-    return round(numeric_value / 20, 2)
+        return round(float(line_spacing), 2)
+    except (TypeError, ValueError):
+        return parse_docx_length(line_spacing)
 
 
-def parse_docx_indentation(
-    paragraph_indent: ElementTree.Element | None, attr_name: str
-) -> float | None:
-    """Parse paragraph indentation from twips to points."""
+def parse_docx_line_spacing_from_style(style: Any) -> float | None:
+    """Read line spacing from a python-docx style object."""
 
-    if paragraph_indent is None:
+    paragraph_format = getattr(style, "paragraph_format", None)
+    if paragraph_format is None:
         return None
-    raw_value = paragraph_indent.get(f"{{{WORD_NAMESPACE['w']}}}{attr_name}")
-    if raw_value is None:
+    line_spacing = getattr(paragraph_format, "line_spacing", None)
+    if line_spacing is None:
         return None
-    try:
-        return round(float(raw_value) / 20, 2)
-    except ValueError:
-        return None
-
-
-def parse_docx_twips(
-    element: ElementTree.Element | None, attr_name: str
-) -> float | None:
-    """Parse a twips-based docx attribute into points."""
-
-    if element is None:
-        return None
-    raw_value = element.get(f"{{{WORD_NAMESPACE['w']}}}{attr_name}")
-    if raw_value is None:
-        return None
-    try:
-        return round(float(raw_value) / 20, 2)
-    except ValueError:
-        return None
+    if isinstance(line_spacing, (int, float)):
+        return round(float(line_spacing), 2)
+    return parse_docx_length(line_spacing)
 
 
 def normalize_docx_style_name(value: str | None) -> str | None:
@@ -593,7 +659,9 @@ def resolve_docx_style_snapshot(
         "name": normalize_docx_style_name(style.get("name")) or base.get("name"),
         "font_name": style.get("font_name") or base.get("font_name"),
         "font_size_pt": style.get("font_size_pt") or base.get("font_size_pt"),
-        "bold": style.get("bold") if style.get("bold") is not None else base.get("bold"),
+        "bold": style.get("bold")
+        if style.get("bold") is not None
+        else base.get("bold"),
         "line_spacing": style.get("line_spacing") or base.get("line_spacing"),
         "space_before_pt": style.get("space_before_pt")
         if style.get("space_before_pt") is not None
@@ -607,55 +675,16 @@ def resolve_docx_style_snapshot(
     }
 
 
-def resolve_docx_run_style_snapshot(
-    run: ElementTree.Element, style_map: dict[str, dict[str, Any]] | None = None
-) -> dict[str, Any]:
-    """Resolve run style inheritance if direct properties are missing."""
+def normalize_docx_alignment(value: Any) -> str | None:
+    """Normalize alignment values from python-docx."""
 
-    run_props = run.find("w:rPr", WORD_NAMESPACE)
-    style_id = get_docx_attr_value(run_props, "rStyle")
-    if not style_id:
-        return {}
-    return resolve_docx_style_snapshot(style_id, style_map)
-
-
-def read_docx_style_map_from_xml(xml_bytes: bytes) -> dict[str, dict[str, Any]]:
-    """Extract a style-id to style snapshot mapping from styles.xml."""
-
-    styles_xml = ElementTree.fromstring(xml_bytes)
-    validate_docx_xml_element_count(styles_xml)
-    style_map: dict[str, dict[str, Any]] = {}
-    for style in iter_limited(
-        styles_xml, "style", max_items=MAX_DOCX_SNAPSHOT_PARAGRAPHS, label="styles"
-    ):
-        style_id = style.get(f"{{{WORD_NAMESPACE['w']}}}styleId")
-        name = get_docx_attr_value(style, "name")
-        if not style_id or not name:
-            continue
-        style_ppr = style.find("w:pPr", WORD_NAMESPACE)
-        style_rpr = style.find("w:rPr", WORD_NAMESPACE)
-        style_map[style_id] = {
-            "name": normalize_docx_style_name(name) or name,
-            "based_on": get_docx_attr_value(style, "basedOn"),
-            "font_name": parse_docx_font_name(style_rpr),
-            "font_size_pt": parse_docx_font_size(style_rpr),
-            "bold": parse_docx_bool(get_docx_child(style_rpr, "b")),
-            "line_spacing": parse_docx_line_spacing(style_ppr),
-            "space_before_pt": parse_docx_twips(get_docx_child(style_ppr, "spacing"), "before"),
-            "space_after_pt": parse_docx_twips(get_docx_child(style_ppr, "spacing"), "after"),
-            "first_line_indent_pt": parse_docx_indentation(
-                get_docx_child(style_ppr, "ind"), "firstLine"
-            ),
-        }
-    return style_map
-
-
-def normalize_docx_alignment(value: str | None) -> str | None:
-    """Normalize docx alignment values to a canonical token."""
-
-    if not value:
+    if value is None:
         return None
-    token = value.strip().lower()
+    token = getattr(value, "name", None)
+    if token is None:
+        token = str(value)
+    token = token.replace("WD_PARAGRAPH_ALIGNMENT.", "").replace("_", " ")
+    token = token.strip().lower()
     aliases = {
         "both": "justify",
         "justified": "justify",
@@ -666,6 +695,12 @@ def normalize_docx_alignment(value: str | None) -> str | None:
         "distribute": "distribute",
     }
     return aliases.get(token, token)
+
+
+def paragraph_alignment_to_token(value: Any) -> str | None:
+    """Convert a python-docx alignment value to a normalized token."""
+
+    return normalize_docx_alignment(value)
 
 
 def clean_text(text: str) -> str:
@@ -755,6 +790,21 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
         title = match.group("title").strip()
         return infer_level(numbering), title, numbering, line
     return None
+
+
+def match_docx_paragraph_heading(
+    paragraph: Any, line: str
+) -> tuple[int, str, str, str] | None:
+    """Match a DOCX paragraph as a heading using style and text heuristics."""
+
+    style = getattr(paragraph, "style", None)
+    style_name = normalize_docx_style_name(getattr(style, "name", None))
+    if style_name and style_name.lower().startswith("heading"):
+        level_match = re.search(r"(\d+)", style_name)
+        level = int(level_match.group(1)) if level_match else 1
+        title = line.strip()
+        return level, title, title, line
+    return match_section_heading(line)
 
 
 def infer_level(prefix: str) -> int:

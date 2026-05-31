@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
+from dataclasses import dataclass
 
 import tiktoken
 
@@ -28,6 +29,20 @@ REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
 TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 TOPIC_NOISE_GENERIC_TERMS = set(TOPIC_NOISE_TERMS["generic_terms"])
 TOPIC_NOISE_GENERIC_FRAGMENTS = tuple(TOPIC_NOISE_TERMS["generic_fragments"])
+
+
+@dataclass(slots=True)
+class LocalIssueGroups:
+    """Local issue groups kept separate from LLM content evidence."""
+
+    format_issues: list[Issue]
+    writing_issues: list[Issue]
+
+    @property
+    def all_issues(self) -> list[Issue]:
+        """Return the combined list for compatibility with the existing UI."""
+
+        return [*self.format_issues, *self.writing_issues]
 
 
 def build_statistics(document: ThesisDocument) -> list[Statistic]:
@@ -139,9 +154,16 @@ def extract_topic_keywords(document: ThesisDocument) -> list[str]:
 def detect_issues(document: ThesisDocument) -> list[Issue]:
     """Detect punctuation and colloquial writing issues."""
 
-    issues = detect_punctuation_issues(document)
-    issues.extend(detect_colloquial_issues(document))
-    return issues
+    return detect_issue_groups(document).all_issues
+
+
+def detect_issue_groups(document: ThesisDocument) -> LocalIssueGroups:
+    """Detect local issues without mixing format and writing concerns."""
+
+    return LocalIssueGroups(
+        format_issues=detect_punctuation_issues(document),
+        writing_issues=detect_colloquial_issues(document),
+    )
 
 
 def detect_punctuation_issues(document: ThesisDocument) -> list[Issue]:

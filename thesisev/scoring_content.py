@@ -225,17 +225,16 @@ def score_experiment_analysis(
 
 def score_writing_quality(
     document: ThesisDocument,
-    issues: list[Issue],
-    format_requirements: dict[str, Any] | None,
+    writing_issues: list[Issue],
     rubric_item: RubricItem,
 ) -> ScoreCriterion:
-    """Score writing quality and formatting from detected issues."""
+    """Score writing quality from locally detected writing issues."""
 
     max_score = rubric_item.max_score
     severity_weights = {"low": 0.35, "medium": 0.65, "high": 1.0}
     issue_counts: dict[tuple[str, str], int] = {}
     issue_examples: dict[tuple[str, str], Issue] = {}
-    for issue in issues:
+    for issue in writing_issues:
         key = (issue.category, issue.rule_id)
         issue_counts[key] = issue_counts.get(key, 0) + 1
         issue_examples.setdefault(key, issue)
@@ -244,9 +243,6 @@ def score_writing_quality(
     for key, count in issue_counts.items():
         issue = issue_examples[key]
         issue_deduction = severity_weights.get(issue.severity, 0.8)
-        if issue.category == "标点误用":
-            deduction += min(issue_deduction * count, 3.0)
-            continue
         deduction += issue_deduction * count
     if len(document.sections) <= 1:
         deduction += 1.2
@@ -254,26 +250,19 @@ def score_writing_quality(
         deduction += 0.8
     score = max_score - min(max_score * 0.8, deduction)
 
-    format_count = (
-        len(format_requirements.get("items", [])) if format_requirements else 0
-    )
     evidence = [
-        f"检测问题 {len(issues)} 项",
+        f"书面表达问题 {len(writing_issues)} 项",
         f"章节数 {len(document.sections)}",
-        f"格式要求条目 {format_count}",
     ]
     deductions: list[str] = []
     suggestions: list[str] = []
-    if issues:
-        deductions.append("存在标点或口语化表达问题")
-        suggestions.append("统一技术论文书面表达和中英文标点规范")
+    if writing_issues:
+        deductions.append("存在口语化表达问题")
+        suggestions.append("统一技术论文书面表达")
     if len(document.sections) <= 1:
         deductions.append("章节结构不稳定，影响条理性判断")
     if not document.abstract:
         deductions.append("未识别到摘要")
-    if format_requirements:
-        evidence.append("已读取上传格式要求，可用于人工复核")
-
     return build_criterion(
         key="writing_quality",
         rubric_item=rubric_item,

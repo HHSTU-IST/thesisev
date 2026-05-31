@@ -21,7 +21,7 @@ from thesisev.analyzers import (
     annotate_section_statistics,
     annotate_topic_relevance,
     build_statistics,
-    detect_issues,
+    detect_issue_groups,
     extract_keywords,
     extract_technology_details,
     extract_technology_stack,
@@ -31,7 +31,11 @@ from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
 from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
-from thesisev.scoring import DEFAULT_THESIS_TECH_RUBRIC, calculate_score_report
+from thesisev.scoring import (
+    DEFAULT_THESIS_TECH_RUBRIC,
+    build_content_context,
+    calculate_score_report,
+)
 
 
 class UploadRequestTooLarge(Exception):
@@ -683,10 +687,19 @@ def evaluate_document(
     annotate_section_statistics(document)
     topic_analysis = annotate_topic_relevance(document)
     statistics = build_statistics(document)
-    issues = detect_issues(document)
+    issue_groups = detect_issue_groups(document)
+    format_issues = issue_groups.format_issues
+    writing_issues = issue_groups.writing_issues
+    issues = issue_groups.all_issues
     keywords = extract_keywords(document)
     technology_details = extract_technology_details(document)
     technology_stack = extract_technology_stack(document)
+    content_context = build_content_context(
+        document=document,
+        topic_analysis=topic_analysis,
+        keywords=keywords,
+        technology_details=technology_details,
+    )
     runtime_model_config = model_config or build_model_config(
         provider=provider,
         model=model,
@@ -697,7 +710,9 @@ def evaluate_document(
     score_report = calculate_score_report(
         document=document,
         topic_analysis=topic_analysis,
-        issues=issues,
+        format_issues=format_issues,
+        writing_issues=writing_issues,
+        content_context=content_context,
         keywords=keywords,
         technology_details=technology_details,
         format_requirements=format_requirements,
@@ -719,6 +734,9 @@ def evaluate_document(
         document=document,
         statistics=statistics,
         issues=issues,
+        format_issues=format_issues,
+        writing_issues=writing_issues,
+        content_context=content_context,
         keywords=keywords,
         technology_stack=technology_stack,
         technology_details=technology_details,
@@ -738,7 +756,10 @@ def evaluate_document(
             "evaluation_roles": {
                 "format_detection": "local",
                 "format_evaluation": "local",
+                "writing_detection": "local",
+                "writing_evaluation": "local",
                 "content_evaluation": comment_source,
+                "llm_input": "content_context_only",
             },
             "model": runtime_model_config.to_metadata(),
         },

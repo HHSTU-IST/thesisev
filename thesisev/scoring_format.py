@@ -89,13 +89,13 @@ def summarize_format_spec(
 def score_format_rules(
     *,
     document: ThesisDocument,
-    issues: list[Issue],
+    format_issues: list[Issue],
     rules: list[dict[str, Any]],
     format_requirements: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Score bundled format rules against document signals."""
 
-    issue_categories = Counter(issue.category for issue in issues)
+    issue_categories = Counter(issue.category for issue in format_issues)
     evidence: list[str] = []
     deductions: list[str] = []
     suggestions: list[str] = []

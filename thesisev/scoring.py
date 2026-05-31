@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -86,7 +85,9 @@ def calculate_score_report(
     *,
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
-    issues: list[Issue],
+    format_issues: list[Issue],
+    writing_issues: list[Issue],
+    content_context: dict[str, Any],
     keywords: list[str],
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None = None,
@@ -102,7 +103,9 @@ def calculate_score_report(
     criteria = score_rubric_items(
         document=document,
         topic_analysis=topic_analysis,
-        issues=issues,
+        format_issues=format_issues,
+        writing_issues=writing_issues,
+        content_context=content_context,
         keywords=keywords,
         technology_details=technology_details,
         format_requirements=format_requirements,
@@ -120,12 +123,7 @@ def calculate_score_report(
 
 def calculate_score_report_with_llm(
     *,
-    document: ThesisDocument,
-    topic_analysis: dict[str, Any],
-    issues: list[Issue],
-    keywords: list[str],
-    technology_details: list[TechnologyStackItem],
-    format_requirements: dict[str, Any] | None,
+    content_context: dict[str, Any],
     rubric_items: list[RubricItem],
     rubric_source: str,
     rubric_filename: str,
@@ -134,12 +132,7 @@ def calculate_score_report_with_llm(
     """Calculate rubric scores by asking an LLM for each criterion."""
 
     prompt = build_score_prompt(
-        document=document,
-        topic_analysis=topic_analysis,
-        issues=issues,
-        keywords=keywords,
-        technology_details=technology_details,
-        format_requirements=format_requirements,
+        content_context=content_context,
         rubric_items=rubric_items,
         rubric_filename=rubric_filename,
     )
@@ -150,7 +143,7 @@ def calculate_score_report_with_llm(
                 content=(
                     "你是一名严谨的中文论文评分老师。"
                     "你只负责六项评分标准打分，不负责格式检测。"
-                    "请根据提供的论文信息、本地检测结果和评分标准，给出六项标准的分数。"
+                    "请仅根据提供的内容证据和评分标准，给出六项标准的分数。"
                     "必须只输出纯 JSON，不要 Markdown，不要解释。"
                 )
             ),
@@ -170,10 +163,9 @@ def calculate_score_report_local(
     *,
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
-    issues: list[Issue],
+    writing_issues: list[Issue],
     keywords: list[str],
     technology_details: list[TechnologyStackItem],
-    format_requirements: dict[str, Any] | None,
     rubric_items: list[RubricItem],
     rubric_source: str,
 ) -> ScoreReport:
@@ -196,8 +188,7 @@ def calculate_score_report_local(
         ),
         score_writing_quality(
             document,
-            issues,
-            format_requirements,
+            writing_issues,
             item_by_name["论文质量"],
         ),
         score_innovation(document, technology_details, item_by_name["创新"]),
@@ -213,7 +204,9 @@ def score_rubric_items(
     *,
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
-    issues: list[Issue],
+    format_issues: list[Issue],
+    writing_issues: list[Issue],
+    content_context: dict[str, Any],
     keywords: list[str],
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None,
@@ -231,14 +224,8 @@ def score_rubric_items(
         if method == "llm" and model_config is not None and model_config.is_available():
             criteria.append(
                 score_item_with_llm(
-                    document=document,
-                    topic_analysis=topic_analysis,
-                    issues=issues,
-                    keywords=keywords,
-                    technology_details=technology_details,
-                    format_requirements=format_requirements,
+                    content_context=content_context,
                     rubric_item=item,
-                    rubric_source=rubric_source,
                     rubric_filename=rubric_filename,
                     model_config=model_config,
                 )
@@ -249,7 +236,8 @@ def score_rubric_items(
                 score_item_locally(
                     document=document,
                     topic_analysis=topic_analysis,
-                    issues=issues,
+                    format_issues=format_issues,
+                    writing_issues=writing_issues,
                     keywords=keywords,
                     technology_details=technology_details,
                     format_requirements=format_requirements,
@@ -274,26 +262,15 @@ def mark_llm_fallback_if_needed(
 
 def score_item_with_llm(
     *,
-    document: ThesisDocument,
-    topic_analysis: dict[str, Any],
-    issues: list[Issue],
-    keywords: list[str],
-    technology_details: list[TechnologyStackItem],
-    format_requirements: dict[str, Any] | None,
+    content_context: dict[str, Any],
     rubric_item: RubricItem,
-    rubric_source: str,
     rubric_filename: str,
     model_config: ModelConfig,
 ) -> ScoreCriterion:
     """Score a single rubric item with the LLM."""
 
     prompt = build_score_prompt(
-        document=document,
-        topic_analysis=topic_analysis,
-        issues=issues,
-        keywords=keywords,
-        technology_details=technology_details,
-        format_requirements=format_requirements,
+        content_context=content_context,
         rubric_items=[rubric_item],
         rubric_filename=rubric_filename,
     )
@@ -304,7 +281,7 @@ def score_item_with_llm(
                 content=(
                     "你是一名严谨的中文论文评分老师。"
                     "你只负责单个评分项打分，不负责格式检测。"
-                    "请根据提供的论文信息、本地检测结果和评分标准，给出该项分数。"
+                    "请仅根据提供的内容证据和评分标准，给出该项分数。"
                     "必须只输出纯 JSON，不要 Markdown，不要解释。"
                 )
             ),
@@ -320,7 +297,8 @@ def score_item_locally(
     *,
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
-    issues: list[Issue],
+    format_issues: list[Issue],
+    writing_issues: list[Issue],
     keywords: list[str],
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None,
@@ -340,14 +318,15 @@ def score_item_locally(
     if rubric_item.name == "实验方案、分析与技能":
         return score_experiment_analysis(document, technology_details, rubric_item)
     if rubric_item.name == "论文质量":
-        return score_writing_quality(document, issues, format_requirements, rubric_item)
+        return score_writing_quality(document, writing_issues, rubric_item)
     if rubric_item.name == "创新":
         return score_innovation(document, technology_details, rubric_item)
     from thesisev.scoring_iot import score_iot_item_locally
 
     iot_criterion = score_iot_item_locally(
         document=document,
-        issues=issues,
+        format_issues=format_issues,
+        writing_issues=writing_issues,
         technology_details=technology_details,
         format_requirements=format_requirements,
         rubric_item=rubric_item,
@@ -396,20 +375,15 @@ def determine_score_source(criteria: list[ScoreCriterion]) -> str:
     return "mixed"
 
 
-def build_score_prompt(
+def build_content_context(
     *,
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
-    issues: list[Issue],
     keywords: list[str],
     technology_details: list[TechnologyStackItem],
-    format_requirements: dict[str, Any] | None,
-    rubric_items: list[RubricItem],
-    rubric_filename: str,
-) -> str:
-    """Build an LLM prompt for rubric scoring."""
+) -> dict[str, Any]:
+    """Build bounded content-only evidence for LLM scoring."""
 
-    issue_summary = summarize_issues(issues)
     tech_summary = [
         {
             "name": item.name,
@@ -418,6 +392,50 @@ def build_score_prompt(
         }
         for item in technology_details
     ]
+    section_summary = [
+        {
+            "identifier": section.identifier,
+            "level": section.level,
+            "title": section.title,
+            "word_count": section.word_count,
+            "excerpt": truncate_context_text(section.content, limit=600),
+        }
+        for section in document.sections[:20]
+        if not section.is_mermaid_code
+    ]
+    return {
+        "title": document.title,
+        "source_type": document.source_type,
+        "total_word_count": document.total_word_count,
+        "section_count": len(document.sections),
+        "abstract": truncate_context_text(document.abstract, limit=1200),
+        "topic_analysis": {
+            "document_ratio": topic_analysis.get("document_ratio", 0),
+            "topic_keywords": topic_analysis.get("topic_keywords", []),
+        },
+        "keywords": keywords,
+        "technology_details": tech_summary,
+        "sections": section_summary,
+    }
+
+
+def truncate_context_text(text: str, *, limit: int) -> str:
+    """Keep prompt evidence bounded while preserving readable excerpts."""
+
+    compact = re.sub(r"\s+", " ", text).strip()
+    if len(compact) <= limit:
+        return compact
+    return f"{compact[:limit].rstrip()}..."
+
+
+def build_score_prompt(
+    *,
+    content_context: dict[str, Any],
+    rubric_items: list[RubricItem],
+    rubric_filename: str,
+) -> str:
+    """Build an LLM prompt that exposes content evidence only."""
+
     rubric_summary = [
         {
             "name": item.name,
@@ -427,18 +445,7 @@ def build_score_prompt(
         for item in rubric_items
     ]
     payload = {
-        "title": document.title,
-        "source_type": document.source_type,
-        "total_word_count": document.total_word_count,
-        "section_count": len(document.sections),
-        "topic_analysis": {
-            "document_ratio": topic_analysis.get("document_ratio", 0),
-            "topic_keywords": topic_analysis.get("topic_keywords", []),
-        },
-        "keywords": keywords,
-        "technology_details": tech_summary,
-        "issues": issue_summary,
-        "format_requirements": format_requirements,
+        "content_context": content_context,
         "rubric_source": rubric_filename,
         "rubric": rubric_summary,
     }
@@ -457,7 +464,9 @@ def build_score_prompt(
         "4. 评分必须参考评分标准，但分数由你综合判断。\n"
         "5. 证据、扣分原因、建议都要简洁具体；"
         "任何低于满分的评分项，deductions 必须给出具体扣分理由，不能留空。\n"
-        f"论文信息：{json.dumps(payload, ensure_ascii=False)}"
+        "6. 只能依据 content_context 中的内容证据评分；"
+        "不得推测或评价格式、标点和口语化表达。\n"
+        f"内容证据：{json.dumps(payload, ensure_ascii=False)}"
     )
 
 
@@ -576,29 +585,6 @@ def deduplicate_preserving_order(values: list[str]) -> list[str]:
     return deduplicated
 
 
-def summarize_issues(issues: list[Issue]) -> list[dict[str, Any]]:
-    """Summarize local formatting issues for the LLM prompt."""
-
-    counts = Counter(issue.category for issue in issues)
-    samples = defaultdict(list)
-    for issue in issues[:20]:
-        samples[issue.category].append(
-            {
-                "message": issue.message,
-                "suggestion": issue.suggestion,
-                "section": issue.section_title,
-            }
-        )
-    return [
-        {
-            "category": category,
-            "count": count,
-            "samples": samples.get(category, []),
-        }
-        for category, count in counts.items()
-    ]
-
-
 def score_topic_workload(
     document: ThesisDocument,
     topic_analysis: dict[str, Any],
@@ -649,15 +635,14 @@ def score_experiment_analysis(
 
 def score_writing_quality(
     document: ThesisDocument,
-    issues: list[Issue],
-    format_requirements: dict[str, Any] | None,
+    writing_issues: list[Issue],
     rubric_item: RubricItem,
 ) -> ScoreCriterion:
-    """Score writing quality and formatting from detected issues."""
+    """Score writing quality from locally detected writing issues."""
 
     from thesisev.scoring_content import score_writing_quality as impl
 
-    return impl(document, issues, format_requirements, rubric_item)
+    return impl(document, writing_issues, rubric_item)
 
 
 def score_innovation(

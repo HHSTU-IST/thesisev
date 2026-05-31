@@ -20,7 +20,8 @@ DEFAULT_IOT_FORMAT_RUBRIC = "score_report_iot_f.json"
 def score_iot_item_locally(
     *,
     document: ThesisDocument,
-    issues: list[Issue],
+    format_issues: list[Issue],
+    writing_issues: list[Issue],
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None,
     rubric_item,
@@ -42,9 +43,11 @@ def score_iot_item_locally(
     if rubric_item.name == "篇幅":
         return score_iot_word_count(document, rubric_item)
     if rubric_item.name == "报告撰写":
-        return score_iot_writing(document, issues, rubric_item)
+        return score_iot_writing(document, writing_issues, rubric_item)
     if rubric_item.name == "格式规范":
-        return score_iot_format(document, issues, format_requirements, rubric_item)
+        return score_iot_format(
+            document, format_issues, format_requirements, rubric_item
+        )
     return None
 
 
@@ -193,10 +196,14 @@ def score_iot_word_count(document: ThesisDocument, rubric_item):
     )
 
 
-def score_iot_writing(document: ThesisDocument, issues: list[Issue], rubric_item):
+def score_iot_writing(
+    document: ThesisDocument, writing_issues: list[Issue], rubric_item
+):
     """Score report writing quality."""
 
-    issue_penalty = sum(0.5 if issue.severity == "low" else 1.0 for issue in issues)
+    issue_penalty = sum(
+        0.5 if issue.severity == "low" else 1.0 for issue in writing_issues
+    )
     score = max(
         0.0, rubric_item.max_score - min(rubric_item.max_score * 0.8, issue_penalty)
     )
@@ -204,15 +211,15 @@ def score_iot_writing(document: ThesisDocument, issues: list[Issue], rubric_item
         key="iot_writing",
         rubric_item=rubric_item,
         score=score,
-        evidence=[f"检测问题 {len(issues)} 项"],
-        deductions=[] if not issues else ["存在格式或表达问题"],
-        suggestions=[] if not issues else ["统一正文表达并修正标点/排版问题"],
+        evidence=[f"书面表达问题 {len(writing_issues)} 项"],
+        deductions=[] if not writing_issues else ["存在口语化表达问题"],
+        suggestions=[] if not writing_issues else ["统一正文书面表达"],
     )
 
 
 def score_iot_format(
     document: ThesisDocument,
-    issues: list[Issue],
+    format_issues: list[Issue],
     format_requirements: dict[str, Any] | None,
     rubric_item,
 ):
@@ -225,7 +232,7 @@ def score_iot_format(
         raise ValueError("format rubric rules are empty")
     summary = score_format_rules(
         document=document,
-        issues=issues,
+        format_issues=format_issues,
         rules=rules,
         format_requirements=format_requirements,
     )
@@ -243,7 +250,7 @@ def score_iot_format(
         evidence=[
             f"格式规范来源 {DEFAULT_IOT_FORMAT_RUBRIC}",
             f"格式要求条目 {format_count}",
-            f"检测问题 {len(issues)} 项",
+            f"格式问题 {len(format_issues)} 项",
         ]
         + summary["evidence"],
         deductions=summary["deductions"],
