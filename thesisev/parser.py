@@ -10,6 +10,7 @@ from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from docx import Document as load_docx_document
 from docx.opc.exceptions import PackageNotFoundError
+from docx.oxml.ns import qn
 
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
 
@@ -61,8 +62,7 @@ def load_document(path: str | Path) -> ThesisDocument:
         cleaned_text = clean_text(raw_text)
         lines = [line.strip() for line in cleaned_text.splitlines()]
         title = next((line for line in lines if line), source_path.stem)
-        body_text = remove_title_from_text(cleaned_text, title)
-        front_matter, sections = parse_sections(body_text)
+        front_matter, sections = parse_docx_sections(docx_document)
     else:
         raw_text = read_source_text(source_path)
         format_snapshot = {}
@@ -177,17 +177,26 @@ def parse_docx_sections(document: Any) -> tuple[str, list[Section]]:
 
     lines: list[str] = []
     headings: list[HeadingMatch] = []
-    front_matter_lines: list[str] = []
-    current_section_index = -1
+    paragraphs = list(getattr(document, "paragraphs", []))
+    has_styled_headings = any(
+        match_docx_style_heading(
+            paragraph, normalize_docx_paragraph_text(paragraph.text)
+        )
+        is not None
+        for paragraph in paragraphs
+    )
 
-    for paragraph in iter_docx_paragraphs(document):
+    for paragraph in paragraphs:
         paragraph_text = normalize_docx_paragraph_text(paragraph.text)
         if not paragraph_text:
             continue
         lines.append(paragraph_text)
-        heading = match_docx_paragraph_heading(paragraph, paragraph_text)
+        heading = match_docx_paragraph_heading(
+            paragraph,
+            paragraph_text,
+            allow_text_fallback=not has_styled_headings,
+        )
         if heading is not None:
-            current_section_index += 1
             headings.append(
                 HeadingMatch(
                     line_index=len(lines) - 1,
@@ -197,14 +206,18 @@ def parse_docx_sections(document: Any) -> tuple[str, list[Section]]:
                     heading=heading[3],
                 )
             )
-        elif current_section_index < 0:
-            front_matter_lines.append(paragraph_text)
 
     if not headings:
         msg = "docx file must contain explicit heading markers"
         raise ValueError(msg)
 
-    front_matter = "\n".join(front_matter_lines).strip()
+    first_level_one = next(
+        (index for index, heading in enumerate(headings) if heading.level == 1), None
+    )
+    if first_level_one is not None:
+        headings = headings[first_level_one:]
+
+    front_matter = "\n".join(lines[: headings[0].line_index]).strip()
     sections: list[Section] = []
     for position, heading in enumerate(headings):
         start_index = heading.line_index + 1
@@ -320,7 +333,7 @@ def build_docx_style_map(document: Any) -> dict[str, dict[str, Any]]:
             "name": normalize_docx_style_name(getattr(style, "name", None))
             or getattr(style, "name", None),
             "based_on": getattr(base_style, "style_id", None),
-            "font_name": getattr(getattr(style, "font", None), "name", None),
+            "font_name": read_docx_font_name(style),
             "font_size_pt": parse_docx_length(
                 getattr(getattr(style, "font", None), "size", None)
             ),
@@ -474,7 +487,11 @@ def extract_docx_paragraph_snapshot(
             raise_docx_traversal_limit(
                 "runs per paragraph", MAX_DOCX_RUNS_PER_PARAGRAPH
             )
-        run_snapshot = extract_docx_run_snapshot(run, style_map=style_map)
+        run_snapshot = extract_docx_run_snapshot(
+            run,
+            style_map=style_map,
+            paragraph_style_snapshot=style_snapshot,
+        )
         if run_snapshot["text"] or any(
             run_snapshot[key] is not None
             for key in ("font_name", "font_size_pt", "bold")
@@ -517,21 +534,41 @@ def extract_docx_paragraph_snapshot(
 
 
 def extract_docx_run_snapshot(
-    run: Any, *, style_map: dict[str, dict[str, Any]] | None = None
+    run: Any,
+    *,
+    style_map: dict[str, dict[str, Any]] | None = None,
+    paragraph_style_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Extract a run-level formatting snapshot."""
 
     run_style_snapshot = resolve_docx_run_style_snapshot(run, style_map)
+    paragraph_style_snapshot = paragraph_style_snapshot or {}
     return {
         "text": normalize_docx_paragraph_text(getattr(run, "text", "")),
-        "font_name": getattr(getattr(run, "font", None), "name", None)
-        or run_style_snapshot.get("font_name"),
+        "font_name": read_docx_font_name(run)
+        or run_style_snapshot.get("font_name")
+        or paragraph_style_snapshot.get("font_name"),
         "font_size_pt": parse_docx_length(
             getattr(getattr(run, "font", None), "size", None)
         )
-        or run_style_snapshot.get("font_size_pt"),
+        or run_style_snapshot.get("font_size_pt")
+        or paragraph_style_snapshot.get("font_size_pt"),
         "bold": getattr(getattr(run, "font", None), "bold", None),
     }
+
+
+def read_docx_font_name(element_owner: Any) -> str | None:
+    """Read East Asian fonts before western fonts from a python-docx object."""
+
+    element = getattr(element_owner, "_element", None)
+    properties = getattr(element, "rPr", None)
+    fonts = getattr(properties, "rFonts", None)
+    if fonts is not None:
+        for attribute in ("w:eastAsia", "w:ascii", "w:hAnsi"):
+            value = fonts.get(qn(attribute))
+            if value:
+                return str(value)
+    return getattr(getattr(element_owner, "font", None), "name", None)
 
 
 def extract_docx_table_snapshot(table: Any) -> dict[str, Any]:
@@ -793,9 +830,22 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
 
 
 def match_docx_paragraph_heading(
-    paragraph: Any, line: str
+    paragraph: Any, line: str, *, allow_text_fallback: bool = True
 ) -> tuple[int, str, str, str] | None:
     """Match a DOCX paragraph as a heading using style and text heuristics."""
+
+    styled_heading = match_docx_style_heading(paragraph, line)
+    if styled_heading is not None:
+        return styled_heading
+    if allow_text_fallback:
+        return match_section_heading(line)
+    return None
+
+
+def match_docx_style_heading(
+    paragraph: Any, line: str
+) -> tuple[int, str, str, str] | None:
+    """Match a DOCX paragraph as a heading using its Word style."""
 
     style = getattr(paragraph, "style", None)
     style_name = normalize_docx_style_name(getattr(style, "name", None))
@@ -804,7 +854,7 @@ def match_docx_paragraph_heading(
         level = int(level_match.group(1)) if level_match else 1
         title = line.strip()
         return level, title, title, line
-    return match_section_heading(line)
+    return None
 
 
 def infer_level(prefix: str) -> int:

@@ -261,7 +261,12 @@ def evaluate_docx_expected_rule(
         )
         if not matched:
             all_matched = False
-    return all_matched, f"{rule['label']}: {'；'.join(results)}"
+    evidence = f"{rule['label']}: {'；'.join(results)}"
+    if not all_matched:
+        excerpt = build_docx_location_excerpt(target_snapshot)
+        if excerpt:
+            evidence = f"{evidence}；所在片段: {excerpt}"
+    return all_matched, evidence
 
 
 def build_rule_suggestion(rule: dict[str, Any]) -> str:
@@ -322,34 +327,92 @@ def select_docx_target_snapshot(
 def select_matching_paragraph(
     paragraphs: Any, expectations: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Select the paragraph most likely to match a rule."""
+    """Select the paragraph that best matches a rule."""
 
     if not isinstance(paragraphs, list) or not paragraphs:
         return None
 
+    candidates = [paragraph for paragraph in paragraphs if isinstance(paragraph, dict)]
+    candidates = select_report_body_paragraphs(candidates)
     style_expected = expectations.get("paragraph.style")
     if style_expected is not None:
         normalized_expected = normalize_docx_expected_token(style_expected)
-        for paragraph in paragraphs:
-            if not isinstance(paragraph, dict):
-                continue
+        style_candidates = [
+            paragraph
+            for paragraph in candidates
             if (
                 normalize_docx_expected_token(paragraph.get("style"))
                 == normalized_expected
-            ):
-                return paragraph
+            )
+        ]
+        if style_candidates:
+            candidates = style_candidates
 
     if any(path.startswith("run.") for path in expectations):
-        for paragraph in paragraphs:
-            if not isinstance(paragraph, dict):
-                continue
-            if paragraph.get("run") or paragraph.get("runs"):
-                return paragraph
+        run_candidates = [
+            paragraph
+            for paragraph in candidates
+            if paragraph.get("run") or paragraph.get("runs")
+        ]
+        if run_candidates:
+            candidates = run_candidates
 
-    for paragraph in paragraphs:
+    return max(
+        candidates,
+        key=lambda paragraph: count_matching_paragraph_expectations(
+            paragraph, expectations
+        ),
+        default=None,
+    )
+
+
+def select_report_body_paragraphs(
+    paragraphs: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Prefer report body paragraphs after the first level-one heading."""
+
+    for index, paragraph in enumerate(paragraphs):
+        if normalize_docx_expected_token(
+            paragraph.get("style")
+        ) == normalize_docx_expected_token("Heading 1"):
+            return paragraphs[index:]
+    return paragraphs
+
+
+def count_matching_paragraph_expectations(
+    paragraph: dict[str, Any], expectations: dict[str, Any]
+) -> int:
+    """Count expected values matched by one paragraph snapshot."""
+
+    snapshot = {"paragraphs": [paragraph]}
+    return sum(
+        compare_docx_expected_value(
+            path, lookup_docx_snapshot_value(snapshot, path), expected
+        )
+        for path, expected in expectations.items()
+    )
+
+
+def build_docx_location_excerpt(snapshot: dict[str, Any]) -> str:
+    """Build a compact human-readable location for a failed DOCX rule."""
+
+    paragraphs = snapshot.get("paragraphs", [])
+    if isinstance(paragraphs, list) and paragraphs:
+        paragraph = paragraphs[0]
         if isinstance(paragraph, dict):
-            return paragraph
-    return None
+            text = re.sub(r"\s+", " ", str(paragraph.get("text", ""))).strip()
+            if text:
+                return f"{text[:120]}{'...' if len(text) > 120 else ''}"
+
+    tables = snapshot.get("tables", [])
+    if isinstance(tables, list) and tables:
+        return "第 1 个表格"
+
+    sections = snapshot.get("sections", [])
+    if isinstance(sections, list) and sections:
+        return "文档页面设置"
+
+    return ""
 
 
 def lookup_docx_snapshot_value(snapshot: dict[str, Any], path: str) -> Any:
@@ -397,18 +460,24 @@ def resolve_from_first_paragraph(snapshot: dict[str, Any], remainder: str) -> An
     if remainder == "paragraph_format.line_spacing":
         return paragraph.get("line_spacing")
     if remainder == "space_before":
-        return paragraph.get("space_before_pt")
+        return default_zero_length(paragraph.get("space_before_pt"))
     if remainder == "paragraph_format.space_before":
-        return paragraph.get("space_before_pt")
+        return default_zero_length(paragraph.get("space_before_pt"))
     if remainder == "space_after":
-        return paragraph.get("space_after_pt")
+        return default_zero_length(paragraph.get("space_after_pt"))
     if remainder == "paragraph_format.space_after":
-        return paragraph.get("space_after_pt")
+        return default_zero_length(paragraph.get("space_after_pt"))
     if remainder == "first_line_indent":
         return paragraph.get("first_line_indent_pt")
     if remainder == "paragraph_format.first_line_indent":
         return paragraph.get("first_line_indent_pt")
     return paragraph.get(remainder)
+
+
+def default_zero_length(value: Any) -> Any:
+    """Represent an unset DOCX spacing length as its effective zero value."""
+
+    return 0.0 if value is None else value
 
 
 def resolve_from_first_run(snapshot: dict[str, Any], remainder: str) -> Any:
@@ -468,6 +537,8 @@ def compare_docx_expected_value(path: str, actual: Any, expected: Any) -> bool:
     """Compare actual and expected values for docx-style paths."""
 
     if actual is None:
+        if path.endswith(("space_before", "space_after")):
+            return compare_length_value(0, expected)
         return False
     if path.endswith("font.size"):
         return compare_numeric_value(actual, expected, tolerance=0.25)
@@ -481,6 +552,8 @@ def compare_docx_expected_value(path: str, actual: Any, expected: Any) -> bool:
         return normalize_docx_expected_token(actual) == normalize_docx_expected_token(
             expected
         )
+    if path.endswith("font.name"):
+        return normalize_docx_font_name(actual) == normalize_docx_font_name(expected)
     if path.endswith("style"):
         return normalize_docx_expected_token(actual) == normalize_docx_expected_token(
             expected
@@ -563,6 +636,22 @@ def normalize_docx_expected_token(value: Any) -> str:
     text = text.replace("wd_align_paragraph.", "")
     text = text.replace("wd_table_alignment.", "")
     return text.replace("_", "")
+
+
+def normalize_docx_font_name(value: Any) -> str:
+    """Normalize common Chinese and English font aliases."""
+
+    token = str(value).strip().lower().replace(" ", "")
+    aliases = {
+        "simhei": "黑体",
+        "黑体": "黑体",
+        "simsun": "宋体",
+        "宋体": "宋体",
+        "songti": "宋体",
+        "songtisc": "宋体",
+        "songtiscregular": "宋体",
+    }
+    return aliases.get(token, token)
 
 
 def format_docx_expected_scalar(value: Any) -> str:

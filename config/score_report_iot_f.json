@@ -17,7 +17,7 @@
             },
             {
               "path": "run.font.name",
-              "value": "SimHei"
+              "value": "黑体"
             },
             {
               "path": "run.font.size",
@@ -39,7 +39,7 @@
             },
             {
               "path": "run.font.name",
-              "value": "SimHei"
+              "value": "黑体"
             },
             {
               "path": "run.font.size",
@@ -61,7 +61,7 @@
             },
             {
               "path": "run.font.name",
-              "value": "SimSun"
+              "value": "宋体"
             },
             {
               "path": "run.font.size",
@@ -81,7 +81,7 @@
             },
             {
               "path": "paragraph_format.first_line_indent",
-              "value": "2ch"
+              "value": "24pt"
             }
           ]
         }
