@@ -374,8 +374,11 @@ def annotate_report_topic_relevance(
         )
         if section is None:
             continue
+        subtree_text = "\n".join(
+            candidate.content for candidate in collect_report_sections([section])
+        )
         covered_standard_count = sum(
-            any(matches_topic_keyword(section.content, keyword) for keyword in keywords)
+            any(matches_topic_keyword(subtree_text, keyword) for keyword in keywords)
             for keywords in standard_keywords
         )
         coverage_ratio = round(
@@ -386,8 +389,11 @@ def annotate_report_topic_relevance(
         )
         earned_score += max_score * coverage_ratio
 
+    mirror_report_paragraph_annotations(document)
     relevant_word_count = sum(
-        section.topic_relevant_word_count for section in document.sections
+        paragraph.word_count
+        for paragraph in collect_report_section_paragraphs(document.sections)
+        if paragraph.topic_is_relevant
     )
     return {
         "topic_keywords": deduplicate_preserving_order(topic_keywords),
@@ -480,12 +486,13 @@ def analyze_paragraph_topic_relevance(
 
 
 def annotate_report_section_topic_relevance(
-    section: Section, topic_keywords: list[str], coverage_ratio: float
+    section: Section, topic_keywords: list[str], coverage_ratio: float | None = None
 ) -> None:
-    """Annotate one matched report section and its paragraphs."""
+    """Annotate one report section subtree and its paragraphs."""
 
     matched_keywords: set[str] = set()
     relevant_word_count = 0
+    weighted_score = 0.0
     for paragraph in section.paragraphs:
         paragraph_matches = [
             keyword
@@ -500,12 +507,95 @@ def annotate_report_section_topic_relevance(
         if paragraph.topic_is_relevant:
             relevant_word_count += paragraph.word_count
         matched_keywords.update(paragraph_matches)
+        weighted_score += paragraph.topic_relevance_score * paragraph.word_count
 
-    section.topic_relevance_score = coverage_ratio
+    for child in section.children:
+        annotate_report_section_topic_relevance(child, topic_keywords)
+        relevant_word_count += child.topic_relevant_word_count
+        matched_keywords.update(child.topic_matched_keywords)
+
+    section.topic_relevance_score = (
+        coverage_ratio
+        if coverage_ratio is not None
+        else round(weighted_score / max(section.word_count, 1), 4)
+    )
     section.topic_relevant_word_count = relevant_word_count
     section.topic_matched_keywords = [
         keyword for keyword in topic_keywords if keyword in matched_keywords
     ]
+
+
+def collect_report_sections(sections: list[Section]) -> list[Section]:
+    """Collect report sections and descendants once in document order."""
+
+    collected: list[Section] = []
+    seen: set[int] = set()
+
+    def collect(section: Section) -> None:
+        if id(section) in seen:
+            return
+        seen.add(id(section))
+        collected.append(section)
+        for child in section.children:
+            collect(child)
+
+    for section in sections:
+        collect(section)
+    return collected
+
+
+def collect_report_section_paragraphs(sections: list[Section]) -> list[Paragraph]:
+    """Collect direct section paragraphs once across a report section tree."""
+
+    paragraphs: list[Paragraph] = []
+    seen: set[int] = set()
+    for section in collect_report_sections(sections):
+        for paragraph in section.paragraphs:
+            if id(paragraph) in seen:
+                continue
+            seen.add(id(paragraph))
+            paragraphs.append(paragraph)
+    return paragraphs
+
+
+def mirror_report_paragraph_annotations(document: ThesisDocument) -> None:
+    """Mirror section paragraph annotations onto flattened document paragraphs."""
+
+    source_paragraphs = collect_report_section_paragraphs(document.sections)
+    source_by_identity = {id(paragraph): paragraph for paragraph in source_paragraphs}
+    sources_by_key: dict[tuple[int, str], list[Paragraph]] = defaultdict(list)
+    sources_by_text: dict[str, list[Paragraph]] = defaultdict(list)
+    for paragraph in source_paragraphs:
+        sources_by_key[(paragraph.index, paragraph.text)].append(paragraph)
+        sources_by_text[paragraph.text].append(paragraph)
+
+    consumed: set[int] = set()
+    for paragraph in document.paragraphs:
+        source = source_by_identity.get(id(paragraph))
+        if source is None:
+            source = next(
+                (
+                    candidate
+                    for candidate in sources_by_key[(paragraph.index, paragraph.text)]
+                    if id(candidate) not in consumed
+                ),
+                None,
+            )
+        if source is None:
+            source = next(
+                (
+                    candidate
+                    for candidate in sources_by_text[paragraph.text]
+                    if id(candidate) not in consumed
+                ),
+                None,
+            )
+        if source is None:
+            continue
+        consumed.add(id(source))
+        paragraph.topic_relevance_score = source.topic_relevance_score
+        paragraph.topic_matched_keywords = list(source.topic_matched_keywords)
+        paragraph.topic_is_relevant = source.topic_is_relevant
 
 
 def annotate_section_statistics(document: ThesisDocument) -> None:
