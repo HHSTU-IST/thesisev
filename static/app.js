@@ -9,6 +9,7 @@ const state = {
   activeIssueFilter: "all",
   activeSectionId: null,
   activeIssueKey: null,
+  activeScoreKey: null,
 };
 
 const form = document.getElementById("evaluate-form");
@@ -46,6 +47,7 @@ form.addEventListener("submit", async (event) => {
     state.result = response.data;
     state.activeIssueFilter = "all";
     state.activeIssueKey = null;
+    state.activeScoreKey = null;
     state.activeSectionId =
       response.data.document.root_sections[0]?.identifier || null;
     renderResults();
@@ -120,6 +122,7 @@ function renderResults() {
   renderTechList("software-tech-list", data.software_technology_stack || []);
   renderTechList("hardware-tech-list", data.hardware_technology_stack || []);
   renderSectionTree(data.document.root_sections);
+  renderFocusPanel();
 }
 
 function renderScoreDetail(scoreDetail) {
@@ -140,7 +143,9 @@ function renderScoreDetail(scoreDetail) {
     `原始分: ${scoreDetail.raw_score}/${scoreDetail.raw_total} | ` +
     `百分制: ${scoreDetail.score}`;
   scoreDetail.criteria.forEach((item) => {
+    const key = buildScoreKey(item);
     const li = document.createElement("li");
+    li.className = `score-item${state.activeScoreKey === key ? " active" : ""}`;
     const deductions = (item.deductions || []).join("；") || "无明显扣分项";
     const title = document.createElement("strong");
     title.textContent = `${item.name}: ${item.score}/${item.max_score}`;
@@ -149,6 +154,13 @@ function renderScoreDetail(scoreDetail) {
     li.appendChild(buildSubline(`方法: ${formatEvaluationMethod(item)}`));
     appendScoreEvidence(li, item);
     li.appendChild(buildSubline(`扣分: ${deductions}`));
+    li.addEventListener("click", () => {
+      state.activeScoreKey = key;
+      state.activeIssueKey = null;
+      renderScoreDetail(state.result.metadata?.score_detail || null);
+      renderIssues(state.result.issues);
+      renderFocusPanel();
+    });
     listNode.appendChild(li);
   });
 }
@@ -238,9 +250,12 @@ function renderIssues(issues) {
     li.appendChild(buildSubline(`建议: ${issue.suggestion}`));
     li.addEventListener("click", () => {
       state.activeIssueKey = key;
+      state.activeScoreKey = null;
       state.activeSectionId = issue.section_identifier;
+      renderScoreDetail(state.result.metadata?.score_detail || null);
       renderIssues(issues);
       renderSectionTree(state.result.document.root_sections);
+      renderFocusPanel();
     });
     node.appendChild(li);
   });
@@ -272,6 +287,113 @@ function buildIssueKey(issue) {
     issue.message || "",
     issue.suggestion || "",
   ].join("::");
+}
+
+function buildScoreKey(item) {
+  return [item.key || "", item.name || ""].join("::");
+}
+
+function renderFocusPanel() {
+  const node = document.getElementById("focus-panel");
+  node.replaceChildren();
+
+  const scoreItem = findActiveScoreItem();
+  if (scoreItem) {
+    const block = buildFocusBlock(
+      "评分扣分项",
+      `${scoreItem.name}: ${scoreItem.score}/${scoreItem.max_score}`,
+    );
+    appendFocusList(block, "扣分项", scoreItem.deductions, "无明显扣分项");
+    appendFocusList(block, "证据", scoreItem.evidence, "暂无证据");
+    appendFocusList(block, "建议", scoreItem.suggestions, "暂无建议");
+    node.appendChild(block);
+    return;
+  }
+
+  const issue = findActiveIssue();
+  if (issue) {
+    const block = buildFocusBlock(
+      "格式问题",
+      `[${issue.category}] ${issue.section_identifier} ${issue.section_title}`,
+    );
+    block.appendChild(buildIssueExcerpt(issue));
+    block.appendChild(buildSubline(`建议: ${issue.suggestion}`, "focus-meta"));
+    node.appendChild(block);
+    return;
+  }
+
+  const section = findSectionByIdentifier(
+    state.result?.document?.root_sections || [],
+    state.activeSectionId,
+  );
+  if (section) {
+    const block = buildFocusBlock(
+      "章节内容",
+      `${section.identifier} ${section.title}`,
+    );
+    block.appendChild(
+      buildSubline(
+        `内容占比 ${(section.ratio * 100).toFixed(1)}% · ` +
+        `主题相关度 ${(section.topic_relevance_score * 100).toFixed(1)}%`,
+        "focus-meta",
+      ),
+    );
+    block.appendChild(
+      buildSubline(section.content || "该章节暂无正文内容。", "focus-paragraph"),
+    );
+    node.appendChild(block);
+    return;
+  }
+
+  node.appendChild(
+    buildSubline("点击评分项、章节树或问题项后，这里会显示对应详情。", "focus-empty"),
+  );
+}
+
+function findActiveScoreItem() {
+  const criteria = state.result?.metadata?.score_detail?.criteria || [];
+  return criteria.find((item) => buildScoreKey(item) === state.activeScoreKey);
+}
+
+function findActiveIssue() {
+  return (state.result?.issues || []).find(
+    (issue) => buildIssueKey(issue) === state.activeIssueKey,
+  );
+}
+
+function findSectionByIdentifier(sections, identifier) {
+  for (const section of sections) {
+    if (section.identifier === identifier) {
+      return section;
+    }
+    const child = findSectionByIdentifier(section.children || [], identifier);
+    if (child) {
+      return child;
+    }
+  }
+  return null;
+}
+
+function buildFocusBlock(kickerText, titleText) {
+  const block = document.createElement("div");
+  block.className = "focus-block";
+  block.appendChild(buildSubline(kickerText, "focus-kicker"));
+  const title = document.createElement("h3");
+  title.textContent = titleText;
+  block.appendChild(title);
+  return block;
+}
+
+function appendFocusList(parent, label, items, fallback) {
+  parent.appendChild(buildSubline(label, "focus-meta"));
+  const list = document.createElement("ul");
+  list.className = "list";
+  (items && items.length ? items : [fallback]).forEach((item) => {
+    const row = document.createElement("li");
+    row.textContent = item;
+    list.appendChild(row);
+  });
+  parent.appendChild(list);
 }
 
 function renderTechList(elementId, technologyStack) {
@@ -331,8 +453,11 @@ function buildSectionNode(section) {
   button.addEventListener("click", () => {
     state.activeSectionId = section.identifier;
     state.activeIssueKey = null;
+    state.activeScoreKey = null;
+    renderScoreDetail(state.result.metadata?.score_detail || null);
     renderSectionTree(state.result.document.root_sections);
     renderIssues(state.result.issues);
+    renderFocusPanel();
   });
   item.appendChild(button);
 

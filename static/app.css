@@ -363,14 +363,16 @@ button:disabled {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
 }
 
-.issue-item {
+.issue-item,
+.score-item {
   cursor: pointer;
   border-radius: 16px;
   padding-left: 14px;
   padding-right: 14px;
 }
 
-.issue-item.active {
+.issue-item.active,
+.score-item.active {
   background: rgba(180, 83, 9, 0.08);
   border-top-color: transparent;
 }
