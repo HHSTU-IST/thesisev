@@ -7,7 +7,7 @@
       {
         "id": "chapter_font",
         "label": "二级标题字体",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "docx_expected",
           "expected": [
@@ -29,7 +29,7 @@
       {
         "id": "subchapter_font",
         "label": "三级标题字体",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "docx_expected",
           "expected": [
@@ -96,7 +96,7 @@
       {
         "id": "paragraph_spacing",
         "label": "段前段后",
-        "points": 2,
+        "points": 3,
         "check": {
           "type": "docx_expected",
           "expected": [
@@ -107,20 +107,6 @@
             {
               "path": "paragraph_format.space_after",
               "value": "0pt"
-            }
-          ]
-        }
-      },
-      {
-        "id": "table_alignment",
-        "label": "表格居中",
-        "points": 3,
-        "check": {
-          "type": "docx_expected",
-          "expected": [
-            {
-              "path": "table.alignment",
-              "value": "WD_TABLE_ALIGNMENT.CENTER"
             }
           ]
         }

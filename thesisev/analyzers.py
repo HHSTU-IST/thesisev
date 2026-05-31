@@ -21,6 +21,7 @@ from thesisev.resources import load_json_resource
 KEYWORDS_TECH = load_json_resource("keywords_tech.json")
 STOPWORDS = set(load_json_resource("stopwords.json"))
 TOPIC_NOISE_TERMS = load_json_resource("topic_noise_terms.json")
+ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
 COLLOQUIAL = load_json_resource("colloquial.json")
 PUNCTUATION_CHINESE = load_json_resource("punctuation_chinese.json")
 PUNCTUATION_ENGLISH = load_json_resource("punctuation_english.json")
@@ -29,6 +30,36 @@ REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
 TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 TOPIC_NOISE_GENERIC_TERMS = set(TOPIC_NOISE_TERMS["generic_terms"])
 TOPIC_NOISE_GENERIC_FRAGMENTS = tuple(TOPIC_NOISE_TERMS["generic_fragments"])
+GENERIC_ANALYSIS_TERMS = set(ANALYZER_TERMS["generic_analysis_terms"])
+GENERIC_TOPIC_TERMS = set(ANALYZER_TERMS["generic_topic_terms"])
+GENERIC_PHRASE_TERMS = set(ANALYZER_TERMS["generic_phrase_terms"])
+REPORT_STANDARD_GENERIC_TERMS = set(ANALYZER_TERMS["report_standard_generic_terms"])
+REPORT_STANDARD_GENERIC_PREFIXES = tuple(
+    ANALYZER_TERMS["report_standard_generic_prefixes"]
+)
+REPORT_STANDARD_GENERIC_SUFFIXES = tuple(
+    ANALYZER_TERMS["report_standard_generic_suffixes"]
+)
+REPORT_STANDARD_GENERIC_ENGLISH_TERMS = set(
+    ANALYZER_TERMS["report_standard_generic_english_terms"]
+)
+REPORT_STANDARD_KEYWORD_ALIASES = {
+    key: tuple(values)
+    for key, values in ANALYZER_TERMS["report_standard_keyword_aliases"].items()
+}
+REPORT_STANDARD_EVIDENCE_TERMS = {
+    key: tuple(values)
+    for key, values in ANALYZER_TERMS["report_standard_evidence_terms"].items()
+}
+PHRASE_PREFIXES = tuple(ANALYZER_TERMS["phrase_prefixes"])
+PHRASE_NOISE_FRAGMENTS = tuple(ANALYZER_TERMS["phrase_noise_fragments"])
+DOMAIN_KEY_PHRASES = tuple(ANALYZER_TERMS["domain_key_phrases"])
+ACTION_OBJECT_TERMS = set(ANALYZER_TERMS["action_object_terms"])
+ACTION_VERBS = tuple(ANALYZER_TERMS["action_verbs"])
+ACTION_PREFIXES = tuple(ANALYZER_TERMS["action_prefixes"])
+ACTION_NOISE_FRAGMENTS = tuple(ANALYZER_TERMS["action_noise_fragments"])
+TITLE_SUFFIXES = tuple(ANALYZER_TERMS["title_suffixes"])
+SECTION_HEADING_TERMS = set(ANALYZER_TERMS["section_heading_terms"])
 
 
 @dataclass(slots=True)
@@ -392,8 +423,8 @@ def annotate_report_topic_relevance(
             candidate.content for candidate in collect_report_sections([section])
         )
         covered_standard_count = sum(
-            any(matches_topic_keyword(subtree_text, keyword) for keyword in keywords)
-            for keywords in standard_keywords
+            matches_report_standard(subtree_text, standard, keywords)
+            for standard, keywords in zip(standards, standard_keywords, strict=True)
         )
         coverage_ratio = round(
             covered_standard_count / max(len(standard_keywords), 1), 4
@@ -510,7 +541,7 @@ def annotate_report_section_topic_relevance(
         paragraph_matches = [
             keyword
             for keyword in topic_keywords
-            if matches_topic_keyword(paragraph.text, keyword)
+            if matches_report_standard_keyword(paragraph.text, keyword)
         ]
         paragraph.topic_relevance_score = round(
             len(paragraph_matches) / max(len(topic_keywords), 1), 4
@@ -718,10 +749,7 @@ def split_technology_stack(
         "编程语言",
         "通信协议",
     }
-    grouped = {
-        "software_technology_stack": [],
-        "hardware_technology_stack": [],
-    }
+    grouped = {"software_technology_stack": [], "hardware_technology_stack": []}
     for item in technology_details:
         if item.category in software_categories:
             grouped["software_technology_stack"].append(item.name)
@@ -1073,6 +1101,24 @@ def matches_topic_keyword(text: str, keyword: str) -> bool:
     return hit_count >= max(2, (len(subterms) * 2 + 2) // 3)
 
 
+def matches_report_standard_keyword(text: str, keyword: str) -> bool:
+    """Match report-standard keywords with a small local alias catalog."""
+
+    return any(
+        matches_topic_keyword(text, candidate)
+        for candidate in (keyword, *REPORT_STANDARD_KEYWORD_ALIASES.get(keyword, ()))
+    )
+
+
+def matches_report_standard(text: str, standard: str, keywords: list[str]) -> bool:
+    """Match one report standard using local evidence terms when configured."""
+
+    evidence_terms = REPORT_STANDARD_EVIDENCE_TERMS.get(standard)
+    if evidence_terms is not None:
+        return any(matches_topic_keyword(text, term) for term in evidence_terms)
+    return any(matches_report_standard_keyword(text, keyword) for keyword in keywords)
+
+
 def topic_keyword_weight(keyword: str) -> float:
     """Assign a higher weight to stronger topic keywords."""
 
@@ -1277,206 +1323,6 @@ def build_colloquial_suggestion(rule: dict[str, object]) -> str:
         example_text = "、".join(str(item) for item in replacements)
         return f"{suggestion} 可参考：{example_text}。"
     return suggestion
-
-
-GENERIC_ANALYSIS_TERMS = {
-    "内容",
-    "模块",
-    "结构",
-    "设计",
-    "实现",
-    "系统",
-    "论文",
-    "评价",
-    "助手",
-    "分析",
-    "研究",
-}
-
-GENERIC_TOPIC_TERMS = {
-    "章节",
-    "评语",
-    "后续",
-    "基础",
-    "结果",
-    "报告",
-    "问题",
-    "任务",
-    "目标",
-    "整体",
-    "质量",
-    "老师",
-    "场景",
-    "初步",
-    "本章",
-}
-
-GENERIC_PHRASE_TERMS = {
-    "第一",
-    "第二",
-    "第三",
-    "基于",
-    "提出",
-    "形成",
-    "快速",
-    "需要",
-    "介绍",
-    "说明",
-    "了解",
-    "划分",
-    "句子",
-    "段落",
-}
-
-REPORT_STANDARD_GENERIC_TERMS = {
-    "与",
-    "中",
-    "环节",
-    "主流",
-    "使用",
-    "关键字",
-    "常见",
-    "当前",
-    "所选",
-    "指标",
-    "应用",
-    "技术",
-    "发展",
-    "时",
-    "重点使用",
-    "阐述",
-    "需要",
-    "相关",
-    "现有",
-    "风险",
-}
-
-REPORT_STANDARD_GENERIC_PREFIXES = (
-    "重点使用",
-    "常见",
-    "当前",
-    "完成",
-    "所选",
-    "使用",
-    "主流",
-    "现有",
-    "相关",
-    "阐述",
-)
-
-REPORT_STANDARD_GENERIC_SUFFIXES = (
-    "可能需要联系",
-    "需要掌握",
-    "过程中",
-    "等指标",
-    "指标",
-    "相关",
-    "需要",
-    "时",
-    "中",
-)
-
-REPORT_STANDARD_GENERIC_ENGLISH_TERMS = {
-    "a",
-    "an",
-    "and",
-    "for",
-    "in",
-    "of",
-    "or",
-    "related",
-    "the",
-    "to",
-    "use",
-    "using",
-    "with",
-}
-
-PHRASE_PREFIXES = (
-    "本文提出",
-    "本章介绍",
-    "本章说明",
-    "往往需要",
-    "系统需要",
-    "需要快速",
-    "需要识别",
-    "用于支持",
-    "用于",
-)
-
-PHRASE_NOISE_FRAGMENTS = ("往往需要", "快速了解", "本章介绍", "本章说明", "系统需要")
-
-DOMAIN_KEY_PHRASES = (
-    "论文评价助手",
-    "结构化分析",
-    "数据结构",
-    "解析流程",
-    "模块划分",
-    "研究背景",
-    "问题定义",
-    "内容分布",
-    "结构安排",
-    "章节识别",
-    "段落识别",
-    "句子识别",
-)
-
-ACTION_OBJECT_TERMS = {"章节", "段落", "句子", "结构", "内容", "数据"}
-
-ACTION_VERBS = (
-    "识别",
-    "检查",
-    "生成",
-    "分析",
-    "处理",
-    "统计",
-    "拆分",
-    "计算",
-    "检索",
-    "评价",
-)
-
-ACTION_PREFIXES = (
-    "这个系统使用",
-    "系统需要完成",
-    "系统需要",
-    "系统使用",
-    "一个用于",
-    "用于",
-    "需要完成",
-    "需要",
-    "完成",
-    "支持",
-    "根据",
-    "针对",
-    "进行",
-    "实现",
-)
-
-ACTION_NOISE_FRAGMENTS = (
-    "辅助系统",
-    "整体质量",
-    "课程论文",
-    "老师需要",
-    "很多场景",
-    "结果不仅",
-    "模块负责",
-)
-
-TITLE_SUFFIXES = ("设计与实现", "设计实现", "设计", "实现", "研究", "方法", "方案")
-
-SECTION_HEADING_TERMS = {
-    "摘要",
-    "绪论",
-    "第一章",
-    "第二章",
-    "第三章",
-    "第四章",
-    "第五章",
-    "第六章",
-    "第七章",
-    "第八章",
-}
 
 
 def detect_punctuation_chinese(
