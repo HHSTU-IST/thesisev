@@ -30,13 +30,13 @@ def score_iot_item_locally(
 
     if rubric_item.name == "调研背景与意义":
         return score_iot_background(document, rubric_item)
-    if rubric_item.name == "调研方法和思路":
+    if rubric_item.name in {"调研方法", "调研方法和思路"}:
         return score_iot_method(document, rubric_item)
-    if rubric_item.name == "软件选型":
+    if rubric_item.name in {"软件架构和工具链", "软件选型"}:
         return score_iot_software(document, technology_details, rubric_item)
     if rubric_item.name == "硬件选型":
         return score_iot_hardware(document, technology_details, rubric_item)
-    if rubric_item.name == "成本核算":
+    if rubric_item.name in {"产品规划与成本核算", "成本核算"}:
         return score_iot_cost(document, rubric_item)
     if rubric_item.name == "未来展望":
         return score_iot_outlook(document, rubric_item)
@@ -88,9 +88,7 @@ def score_iot_method(document: ThesisDocument, rubric_item):
 
 
 def score_iot_software(
-    document: ThesisDocument,
-    technology_details: list[TechnologyStackItem],
-    rubric_item,
+    document: ThesisDocument, technology_details: list[TechnologyStackItem], rubric_item
 ):
     """Score software selection."""
 
@@ -115,9 +113,7 @@ def score_iot_software(
 
 
 def score_iot_hardware(
-    document: ThesisDocument,
-    technology_details: list[TechnologyStackItem],
-    rubric_item,
+    document: ThesisDocument, technology_details: list[TechnologyStackItem], rubric_item
 ):
     """Score hardware selection."""
 

@@ -79,35 +79,16 @@ class LocalIssueGroups:
 def build_statistics(
     document: ThesisDocument, *, topic_analysis: dict[str, object] | None = None
 ) -> list[Statistic]:
-    """Build human-readable statistics for the thesis."""
+    """Build display statistics for level-two section content."""
 
     annotate_section_statistics(document)
     if topic_analysis is None:
-        topic_analysis = annotate_topic_relevance(document)
-    if "earned_score" in topic_analysis and "total_score" in topic_analysis:
-        topic_statistic = Statistic(
-            label="主题相关度评分",
-            value=(
-                f"{topic_analysis['document_ratio'] * 100:.1f}% "
-                f"({topic_analysis['earned_score']}/{topic_analysis['total_score']})"
-            ),
-        )
-    else:
-        topic_statistic = Statistic(
-            label="主题相关内容占比",
-            value=(
-                f"{topic_analysis['document_ratio'] * 100:.1f}% "
-                f"({topic_analysis['relevant_word_count']}/{document.total_word_count})"
-            ),
-        )
-    statistics = [
-        Statistic(label="篇幅", value=str(document.total_word_count)),
-        Statistic(label="章节数", value=str(len(document.sections))),
-        Statistic(label="段落数", value=str(len(document.paragraphs))),
-        Statistic(label="句子数", value=str(len(document.sentences))),
-        topic_statistic,
-    ]
-    for section in document.root_sections:
+        annotate_topic_relevance(document)
+    statistics: list[Statistic] = []
+    for section in document.sections:
+        if section.level != 2:
+            continue
+        relevant_word_count = count_section_subtree_topic_relevant_words(section)
         statistics.append(
             Statistic(
                 label=f"章节占比 - {section.title}",
@@ -122,11 +103,10 @@ def build_statistics(
                 label=f"主题相关度 - {section.title}",
                 value=(
                     f"{section.topic_relevance_score * 100:.1f}% "
-                    f"({section.topic_relevant_word_count}/{max(section.word_count, 1)})"
+                    f"({relevant_word_count}/{max(section.subtree_word_count, 1)})"
                 ),
             )
         )
-        statistics.extend(build_child_statistics(section))
     return statistics
 
 
@@ -690,31 +670,17 @@ def apply_section_ratios(section: Section, total_words: int, parent_total: int) 
             )
 
 
-def build_child_statistics(section: Section) -> list[Statistic]:
-    """Build nested statistics for child sections within a parent section."""
+def count_section_subtree_topic_relevant_words(section: Section) -> int:
+    """Count relevant words within one section and its descendants."""
 
-    statistics: list[Statistic] = []
-    for child in section.children:
-        statistics.append(
-            Statistic(
-                label=f"章内占比 - {section.title} / {child.title}",
-                value=(
-                    f"{child.parent_ratio * 100:.1f}% "
-                    f"({child.subtree_word_count}/{section.subtree_word_count})"
-                ),
-            )
-        )
-        statistics.append(
-            Statistic(
-                label=f"主题相关度 - {section.title} / {child.title}",
-                value=(
-                    f"{child.topic_relevance_score * 100:.1f}% "
-                    f"({child.topic_relevant_word_count}/{max(child.word_count, 1)})"
-                ),
-            )
-        )
-        statistics.extend(build_child_statistics(child))
-    return statistics
+    relevant_word_count = sum(
+        paragraph.word_count
+        for paragraph in section.paragraphs
+        if paragraph.topic_is_relevant
+    )
+    return relevant_word_count + sum(
+        count_section_subtree_topic_relevant_words(child) for child in section.children
+    )
 
 
 def group_technology_stack(

@@ -289,16 +289,21 @@ function renderTechList(elementId, technologyStack) {
   );
 }
 
+const MAX_VISIBLE_SECTION_LEVEL = 2;
+
 function renderSectionTree(rootSections) {
   const node = document.getElementById("section-tree");
   node.innerHTML = "";
-  if (!rootSections.length) {
+  const visibleRootSections = rootSections.filter(
+    (section) => section.level <= MAX_VISIBLE_SECTION_LEVEL,
+  );
+  if (!visibleRootSections.length) {
     node.textContent = "未识别到章节结构";
     return;
   }
   const list = document.createElement("ul");
   list.className = "tree-list";
-  rootSections.forEach((section) => {
+  visibleRootSections.forEach((section) => {
     list.appendChild(buildSectionNode(section));
   });
   node.appendChild(list);
@@ -337,10 +342,13 @@ function buildSectionNode(section) {
   });
   item.appendChild(button);
 
-  if (section.children && section.children.length) {
+  const visibleChildren = (section.children || []).filter(
+    (section) => section.level <= MAX_VISIBLE_SECTION_LEVEL,
+  );
+  if (visibleChildren.length) {
     const childList = document.createElement("ul");
     childList.className = "tree-list";
-    section.children.forEach((child) => {
+    visibleChildren.forEach((child) => {
       childList.appendChild(buildSectionNode(child));
     });
     item.appendChild(childList);
