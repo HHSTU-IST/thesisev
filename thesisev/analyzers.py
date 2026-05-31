@@ -281,6 +281,116 @@ def calculate_score(issues: list[Issue], section_count: int) -> int:
     return max(60, min(98, score))
 
 
+def extract_standard_keywords(standard: str) -> list[str]:
+    """Split a report rubric standard into ordered topic keywords."""
+
+    keywords: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9+\-]*|[\u4e00-\u9fff]+", standard):
+        if re.search(r"[A-Za-z]", token):
+            if token.lower() not in REPORT_STANDARD_GENERIC_ENGLISH_TERMS:
+                keywords.append(token)
+            continue
+        for phrase in re.split(r"以及|的|与|和|及|或|在|对", token):
+            normalized = normalize_standard_keyword(phrase)
+            if normalized:
+                keywords.append(normalized)
+    return deduplicate_preserving_order(keywords)
+
+
+def normalize_standard_keyword(keyword: str) -> str:
+    """Remove instructional noise from one report-standard keyword."""
+
+    compact = keyword.strip()
+    changed = True
+    while changed:
+        changed = False
+        for prefix in REPORT_STANDARD_GENERIC_PREFIXES:
+            if compact.startswith(prefix) and len(compact) > len(prefix):
+                compact = compact[len(prefix) :]
+                changed = True
+                break
+    for suffix in REPORT_STANDARD_GENERIC_SUFFIXES:
+        if compact.endswith(suffix) and len(compact) > len(suffix):
+            compact = compact[: -len(suffix)]
+            break
+    if compact in REPORT_STANDARD_GENERIC_TERMS or len(compact) < 2:
+        return ""
+    return compact
+
+
+def parse_report_standards(value: object) -> list[str]:
+    """Normalize report rubric standards without importing scoring helpers."""
+
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return [str(value).strip()] if str(value).strip() else []
+
+
+def annotate_report_topic_relevance(
+    document: ThesisDocument, rubric_items: list[dict[str, object]]
+) -> dict[str, object]:
+    """Annotate report sections using configured rubric-standard coverage."""
+
+    for paragraph in document.paragraphs:
+        paragraph.topic_relevance_score = 0.0
+        paragraph.topic_matched_keywords = []
+        paragraph.topic_is_relevant = False
+    for section in document.sections:
+        section.topic_relevance_score = 0.0
+        section.topic_relevant_word_count = 0
+        section.topic_matched_keywords = []
+
+    topic_keywords: list[str] = []
+    earned_score = 0.0
+    total_score = 0.0
+    for rubric_item in rubric_items:
+        criterion = str(rubric_item.get("criterion", "")).strip()
+        standards = parse_report_standards(
+            rubric_item.get("standard", rubric_item.get("standards", []))
+        )
+        max_score = float(rubric_item.get("score", rubric_item.get("max_score", 0)))
+        total_score += max_score
+        standard_keywords = [extract_standard_keywords(standard) for standard in standards]
+        section_keywords = deduplicate_preserving_order(
+            [keyword for keywords in standard_keywords for keyword in keywords]
+        )
+        topic_keywords.extend(section_keywords)
+        section = next(
+            (
+                candidate
+                for candidate in document.sections
+                if criterion and criterion in candidate.title
+            ),
+            None,
+        )
+        if section is None:
+            continue
+        covered_standard_count = sum(
+            any(matches_topic_keyword(section.content, keyword) for keyword in keywords)
+            for keywords in standard_keywords
+        )
+        coverage_ratio = round(
+            covered_standard_count / max(len(standard_keywords), 1), 4
+        )
+        annotate_report_section_topic_relevance(section, section_keywords, coverage_ratio)
+        earned_score += max_score * coverage_ratio
+
+    relevant_word_count = sum(
+        section.topic_relevant_word_count for section in document.sections
+    )
+    return {
+        "topic_keywords": deduplicate_preserving_order(topic_keywords),
+        "relevant_word_count": relevant_word_count,
+        "document_ratio": round(earned_score / max(total_score, 1.0), 4),
+        "earned_score": round(earned_score, 4),
+        "total_score": round(total_score, 4),
+    }
+
+
 def annotate_topic_relevance(document: ThesisDocument) -> dict[str, object]:
     """Annotate paragraphs and sections with topic relevance information."""
 
@@ -360,6 +470,35 @@ def analyze_paragraph_topic_relevance(
         "matched_keywords": matched_keywords,
         "is_relevant": is_relevant,
     }
+
+
+def annotate_report_section_topic_relevance(
+    section: Section, topic_keywords: list[str], coverage_ratio: float
+) -> None:
+    """Annotate one matched report section and its paragraphs."""
+
+    matched_keywords: set[str] = set()
+    relevant_word_count = 0
+    for paragraph in section.paragraphs:
+        paragraph_matches = [
+            keyword
+            for keyword in topic_keywords
+            if matches_topic_keyword(paragraph.text, keyword)
+        ]
+        paragraph.topic_relevance_score = round(
+            len(paragraph_matches) / max(len(topic_keywords), 1), 4
+        )
+        paragraph.topic_matched_keywords = paragraph_matches
+        paragraph.topic_is_relevant = bool(paragraph_matches)
+        if paragraph.topic_is_relevant:
+            relevant_word_count += paragraph.word_count
+        matched_keywords.update(paragraph_matches)
+
+    section.topic_relevance_score = coverage_ratio
+    section.topic_relevant_word_count = relevant_word_count
+    section.topic_matched_keywords = [
+        keyword for keyword in topic_keywords if keyword in matched_keywords
+    ]
 
 
 def annotate_section_statistics(document: ThesisDocument) -> None:
@@ -1064,6 +1203,66 @@ GENERIC_PHRASE_TERMS = {
     "划分",
     "句子",
     "段落",
+}
+
+REPORT_STANDARD_GENERIC_TERMS = {
+    "与",
+    "中",
+    "环节",
+    "主流",
+    "使用",
+    "关键字",
+    "常见",
+    "当前",
+    "所选",
+    "指标",
+    "时",
+    "重点使用",
+    "阐述",
+    "需要",
+    "相关",
+    "现有",
+}
+
+REPORT_STANDARD_GENERIC_PREFIXES = (
+    "重点使用",
+    "常见",
+    "当前",
+    "完成",
+    "所选",
+    "使用",
+    "主流",
+    "现有",
+    "相关",
+    "阐述",
+)
+
+REPORT_STANDARD_GENERIC_SUFFIXES = (
+    "可能需要联系",
+    "需要掌握",
+    "过程中",
+    "等指标",
+    "指标",
+    "相关",
+    "需要",
+    "时",
+    "中",
+)
+
+REPORT_STANDARD_GENERIC_ENGLISH_TERMS = {
+    "a",
+    "an",
+    "and",
+    "for",
+    "in",
+    "of",
+    "or",
+    "related",
+    "the",
+    "to",
+    "use",
+    "using",
+    "with",
 }
 
 PHRASE_PREFIXES = (
