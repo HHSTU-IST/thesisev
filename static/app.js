@@ -478,7 +478,7 @@ function buildMarkdown(data) {
     "",
     `- 分数: ${data.score}`,
     `- 类型: ${data.document.source_type}`,
-    `- 主题相关占比: ${(data.topic_relevance_ratio * 100).toFixed(1)}%`,
+    `- 主题相关度: ${(data.topic_relevance_ratio * 100).toFixed(1)}%`,
     `- 分数来源: ${formatScoreSource(data.metadata?.score_source || "local")}`,
     `- 内容评价来源: ${formatCommentSource(data.metadata?.comment_source || "fallback")}`,
     `- 格式检测与评价: ${formatRoleSource(data.metadata?.evaluation_roles?.format_evaluation || "local")}`,
