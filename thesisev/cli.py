@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from thesisev.analyzers import split_technology_stack
-from thesisev.api import evaluate_document, structure_document
+from thesisev.api import evaluate_document, resolve_preset_files, structure_document
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=400,
         help="Maximum output tokens for generated commentary.",
     )
+    parser.add_argument(
+        "--preset",
+        choices=("thesis_tech", "report_iot"),
+        default="thesis_tech",
+        help="Built-in scoring preset, such as thesis_tech or report_iot.",
+    )
     return parser
 
 
@@ -73,12 +79,14 @@ def main() -> int:
             print_structure(document)
         return 0
 
+    rubric_filename, _format_filename = resolve_preset_files(args.preset)
     result = evaluate_document(
         source,
         provider=args.provider,
         model=args.model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+        rubric_filename=rubric_filename,
     )
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))

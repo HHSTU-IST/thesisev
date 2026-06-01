@@ -30,6 +30,7 @@ uv sync
 
 ```bash
 uv run thesisev examples/sample_thesis.md
+uv run thesisev examples/sample_thesis.md --preset report_iot
 ```
 
 启动 Web UI：
@@ -46,7 +47,11 @@ open http://127.0.0.1:8000
 ```bash
 uv run thesisev examples/sample_thesis.md
 uv run thesisev examples/sample_thesis.md --output structure
+uv run thesisev examples/sample_thesis.md --preset report_iot
+uv run thesisev examples/sample_thesis.md --preset report_iot --json
 ```
+
+其中 `--preset` 用于选择程序内置评分预设，当前支持 `thesis_tech` 和 `report_iot`。
 
 ## API / UI
 
