@@ -28,6 +28,10 @@ SECTION_PATTERN = re.compile(
 MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#+\s*(.+?)\s*$")
 SENTENCE_SPLIT_PATTERN = re.compile(r"(?<=[。！？!?；;])\s*")
 MERMAID_FENCE_PATTERN = re.compile(r"(?ms)^```[ \t]*mermaid[^\n]*\n.*?^```[ \t]*$")
+COVER_TITLE_PATTERNS = (
+    re.compile(r"^\s*课题名称\s*[：:]\s*(?P<title>.+?)\s*$"),
+    re.compile(r"^\s*(?:论文题目|题目)\s*[：:]\s*(?P<title>.+?)\s*$"),
+)
 MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
 MAX_DOCX_MEMBER_COUNT = 512
 MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
@@ -60,9 +64,8 @@ def load_document(path: str | Path) -> ThesisDocument:
         raw_text = read_docx_text_from_document(docx_document)
         format_snapshot = read_docx_format_snapshot_from_document(docx_document)
         cleaned_text = clean_text(raw_text)
-        lines = [line.strip() for line in cleaned_text.splitlines()]
-        title = next((line for line in lines if line), source_path.stem)
         front_matter, sections = parse_docx_sections(docx_document)
+        title = extract_document_title(front_matter, fallback=source_path.stem)
     else:
         raw_text = read_source_text(source_path)
         format_snapshot = {}
@@ -95,6 +98,38 @@ def load_document(path: str | Path) -> ThesisDocument:
         total_word_count=total_word_count,
         format_snapshot=format_snapshot,
     )
+
+
+def extract_document_title(text: str, *, fallback: str) -> str:
+    """Extract a cover-page title, preferring explicit topic metadata."""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for pattern in COVER_TITLE_PATTERNS:
+        for line in lines:
+            match = pattern.match(line)
+            if match is None:
+                continue
+            candidate = match.group("title").strip()
+            if is_document_title_candidate(candidate):
+                return candidate
+    return next(
+        (line for line in lines if is_document_title_candidate(line)),
+        fallback,
+    )
+
+
+def is_document_title_candidate(text: str) -> bool:
+    """Reject common cover labels and template instructions as title candidates."""
+
+    if not text or len(text) > 120:
+        return False
+    if re.match(
+        r"^(课程名称|专业班级|课题名称|学生学号|学生姓名|所属院部|指导教师|"
+        r"作业要求|要求|作业指南|文字格式|图表格式)\s*[：:]?",
+        text,
+    ):
+        return False
+    return not text.startswith(("居中", "黑体", "宋体", "颜色为", "不要", "使用"))
 
 
 def read_source_text(path: Path) -> str:

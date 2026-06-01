@@ -78,9 +78,11 @@ def generate_comment_with_llm(
                     content=(
                         "你是一名严谨的中文论文评审助手。"
                         "请根据给定分析结果生成一段 120 到 180 字的内容评价。"
+                        "评价必须优先围绕论文标题判断正文与题目的契合度。"
                         "评价要聚焦选题、论证、方案、技术路线和创新价值。"
+                        "不要泛泛讨论章节数量或章节比例。"
                         "不要评价格式、排版、标点规范，也不要给出分数。"
-                        "必须包含至少两个关键词，不要直接复述完整论文标题。"
+                        "题目中可识别多个关键词时至少包含两个，不要直接复述完整论文标题。"
                     )
                 ),
                 HumanMessage(content=prompt),
@@ -106,14 +108,10 @@ def build_rule_based_comment(
 ) -> str:
     """Build the original deterministic comment as a safe fallback."""
 
-    structure_summary = summarize_structure(root_sections)
     topic_summary = summarize_topic_relevance(topic_keywords, topic_relevance_ratio)
     technology_summary = summarize_technology(technology_details)
     focus_text = "、".join(focus_keywords) if focus_keywords else "研究主题"
-    comment = (
-        f"论文围绕{focus_text}等内容展开，{structure_summary}。"
-        f"{topic_summary}{technology_summary}"
-    )
+    comment = f"论文围绕{focus_text}等内容展开。{topic_summary}{technology_summary}"
     return comment.replace(title, focus_text)
 
 
@@ -137,21 +135,15 @@ def build_comment_prompt(
         )
         or "未提取到明确技术栈"
     )
-    section_summary = (
-        "；".join(
-            f"{section.title}({section.ratio * 100:.1f}%)"
-            for section in root_sections[:6]
-        )
-        or "未识别到稳定章节结构"
-    )
+    visible_topic_keywords = filter_comment_keywords(topic_keywords)
     return (
         f"论文标题：{title}\n"
         f"建议覆盖关键词：{'、'.join(focus_keywords) or '研究主题'}\n"
-        f"主题关键词：{'、'.join(topic_keywords) or '无'}\n"
+        f"主题关键词：{'、'.join(visible_topic_keywords) or '无'}\n"
         f"主题相关内容占比：{topic_relevance_ratio * 100:.1f}%\n"
-        f"章节分布：{section_summary}\n"
         f"技术栈：{technology_summary}\n"
-        "请只评价论文内容质量，不要讨论格式、标点、排版或评分。"
+        "请以论文标题为中心评价内容质量，不要讨论章节数量、章节比例、"
+        "格式、标点、排版或评分。"
         "请输出一段中文内容评价，不要分点。"
     )
 
@@ -177,14 +169,29 @@ def select_comment_keywords(title: str, fallback_keywords: list[str]) -> list[st
     """Pick a small set of title-related keywords for the comment."""
 
     title_keywords = extract_title_keywords(title)
-    selected = deduplicate_preserving_order(title_keywords)
-    if len(selected) < 2:
+    selected = filter_comment_keywords(title_keywords)
+    if not selected:
         for keyword in fallback_keywords:
-            if keyword == title or keyword in GENERIC_TITLE_TERMS:
+            if keyword == title or not is_comment_keyword_candidate(keyword):
                 continue
             selected.append(keyword)
     compact = [keyword for keyword in selected if keyword not in GENERIC_TITLE_TERMS]
     return compact[:3]
+
+
+def filter_comment_keywords(keywords: list[str]) -> list[str]:
+    """Remove template and file-format markers from commentary keywords."""
+
+    return deduplicate_preserving_order(
+        [keyword for keyword in keywords if is_comment_keyword_candidate(keyword)]
+    )
+
+
+def is_comment_keyword_candidate(keyword: str) -> bool:
+    """Keep commentary keywords focused on thesis content."""
+
+    normalized = keyword.strip().lower()
+    return bool(normalized) and normalized not in COMMENT_KEYWORD_NOISE_TERMS
 
 
 def extract_title_keywords(title: str) -> list[str]:
@@ -311,4 +318,12 @@ GENERIC_TITLE_TERMS = {
     "基于",
     "面向",
     "方法",
+}
+
+COMMENT_KEYWORD_NOISE_TERMS = {
+    "docx",
+    "draw",
+    "draw.io",
+    "io",
+    "mermaid",
 }

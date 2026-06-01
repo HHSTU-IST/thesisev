@@ -103,8 +103,14 @@ function renderResults() {
   document.getElementById("score-badge").textContent = `${data.score} 分`;
   document.getElementById("doc-title").textContent = data.document.title;
   document.getElementById("doc-type").textContent = data.document.source_type;
-  document.getElementById("doc-sections").textContent = String(
-    data.document.sections.length,
+  document.getElementById("doc-level-one-sections").textContent = String(
+    countSectionsByLevel(data.document.sections, 1),
+  );
+  document.getElementById("doc-level-two-sections").textContent = String(
+    countSectionsByLevel(data.document.sections, 2),
+  );
+  document.getElementById("doc-level-three-sections").textContent = String(
+    countSectionsByLevel(data.document.sections, 3),
   );
   document.getElementById("topic-ratio").textContent = `${(
     data.topic_relevance_ratio * 100
@@ -163,6 +169,10 @@ function renderScoreDetail(scoreDetail) {
     });
     listNode.appendChild(li);
   });
+}
+
+function countSectionsByLevel(sections, level) {
+  return sections.filter((section) => section.level === level).length;
 }
 
 function appendScoreEvidence(parent, item) {

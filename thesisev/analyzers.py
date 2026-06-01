@@ -115,7 +115,9 @@ def extract_keywords(document: ThesisDocument) -> list[str]:
 
     title_tokens = normalize_topic_terms(split_title_keywords(document.title))
     topic_tokens = extract_topic_keywords(document)
-    latin_terms = normalize_topic_terms(extract_latin_terms(document.cleaned_text))
+    latin_terms = normalize_topic_terms(
+        extract_latin_terms(build_topic_body_text(document))
+    )
     candidates = deduplicate_preserving_order(title_tokens + topic_tokens + latin_terms)
     return candidates[:5]
 
@@ -151,17 +153,17 @@ def extract_technology_stack(document: ThesisDocument) -> list[str]:
 def extract_topic_keywords(document: ThesisDocument) -> list[str]:
     """Extract topic keywords from the title, abstract, and body."""
 
+    body_text = build_topic_body_text(document)
+    abstract = "" if document.abstract == document.front_matter else document.abstract
     title_tokens = normalize_topic_terms(split_title_keywords(document.title))
     abstract_tokens = normalize_topic_terms(
-        extract_tiktoken_keywords(document.abstract, top_k=6)
+        extract_tiktoken_keywords(abstract, top_k=6)
     )
     action_tokens = normalize_topic_terms(
-        extract_paragraph_action_keywords(document.paragraphs)
+        extract_paragraph_action_keywords(collect_topic_paragraphs(document))
     )
-    body_tokens = normalize_topic_terms(
-        extract_tiktoken_keywords(document.cleaned_text, top_k=8)
-    )
-    latin_terms = normalize_topic_terms(extract_latin_terms(document.cleaned_text))
+    body_tokens = normalize_topic_terms(extract_tiktoken_keywords(body_text, top_k=8))
+    latin_terms = normalize_topic_terms(extract_latin_terms(body_text))
 
     prioritized: list[str] = []
     for token in (
@@ -173,6 +175,27 @@ def extract_topic_keywords(document: ThesisDocument) -> list[str]:
             continue
         prioritized.append(token)
     return prioritized[:6]
+
+
+def build_topic_body_text(document: ThesisDocument) -> str:
+    """Build topic-analysis text from evaluable body sections only."""
+
+    return "\n".join(
+        section.content
+        for section in document.sections
+        if not section.skip_format_check
+    )
+
+
+def collect_topic_paragraphs(document: ThesisDocument) -> list[Paragraph]:
+    """Collect body paragraphs while excluding template-like sections."""
+
+    return [
+        paragraph
+        for section in document.sections
+        if not section.skip_format_check
+        for paragraph in section.paragraphs
+    ]
 
 
 def detect_issues(document: ThesisDocument) -> list[Issue]:
