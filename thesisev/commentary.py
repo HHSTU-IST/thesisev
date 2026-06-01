@@ -9,6 +9,11 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from thesisev.llm import ModelConfig, create_chat_model
+from thesisev.resources import load_json_resource
+
+ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
+GENERIC_TITLE_TERMS = set(ANALYZER_TERMS["generic_title_terms"])
+COMMENT_KEYWORD_NOISE_TERMS = set(ANALYZER_TERMS["comment_keyword_noise_terms"])
 
 
 def generate_comment(
@@ -304,26 +309,3 @@ def deduplicate_preserving_order(values: list[str]) -> list[str]:
         seen.add(value)
         ordered.append(value)
     return ordered
-
-
-GENERIC_TITLE_TERMS = {
-    "论文",
-    "设计",
-    "实现",
-    "系统",
-    "研究",
-    "分析",
-    "评价",
-    "助手",
-    "基于",
-    "面向",
-    "方法",
-}
-
-COMMENT_KEYWORD_NOISE_TERMS = {
-    "docx",
-    "draw",
-    "draw.io",
-    "io",
-    "mermaid",
-}

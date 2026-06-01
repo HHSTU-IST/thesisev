@@ -37,6 +37,7 @@ void loadHistory();
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  resetRenderedResults();
   setLoading(true, "正在分析论文，请稍候...");
 
   try {
@@ -57,6 +58,16 @@ form.addEventListener("submit", async (event) => {
     setLoading(false, error.message || "处理失败");
   }
 });
+
+function resetRenderedResults() {
+  state.result = null;
+  state.activeIssueFilter = "all";
+  state.activeSectionId = null;
+  state.activeIssueKey = null;
+  state.activeScoreKey = null;
+  resultsNode.classList.add("hidden");
+  document.getElementById("doc-title").textContent = "-";
+}
 
 async function submitEvaluation() {
   const formData = new FormData();
