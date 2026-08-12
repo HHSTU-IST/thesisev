@@ -112,10 +112,7 @@ def extract_document_title(text: str, *, fallback: str) -> str:
             candidate = match.group("title").strip()
             if is_document_title_candidate(candidate):
                 return candidate
-    return next(
-        (line for line in lines if is_document_title_candidate(line)),
-        fallback,
-    )
+    return next((line for line in lines if is_document_title_candidate(line)), fallback)
 
 
 def is_document_title_candidate(text: str) -> bool:
@@ -227,9 +224,7 @@ def parse_docx_sections(document: Any) -> tuple[str, list[Section]]:
             continue
         lines.append(paragraph_text)
         heading = match_docx_paragraph_heading(
-            paragraph,
-            paragraph_text,
-            allow_text_fallback=not has_styled_headings,
+            paragraph, paragraph_text, allow_text_fallback=not has_styled_headings
         )
         if heading is not None:
             headings.append(
@@ -281,13 +276,11 @@ def open_docx_document(path: Path) -> Any:
         with ZipFile(path) as archive:
             validate_docx_archive_members(archive)
             validate_docx_member_size(
-                get_docx_document_xml_info(archive),
-                max_size=MAX_DOCX_MEMBER_BYTES,
+                get_docx_document_xml_info(archive), max_size=MAX_DOCX_MEMBER_BYTES
             )
             if "word/styles.xml" in archive.namelist():
                 validate_docx_member_size(
-                    archive.getinfo("word/styles.xml"),
-                    max_size=MAX_DOCX_MEMBER_BYTES,
+                    archive.getinfo("word/styles.xml"), max_size=MAX_DOCX_MEMBER_BYTES
                 )
     except BadZipFile as exc:
         msg = "invalid docx archive"
@@ -523,9 +516,7 @@ def extract_docx_paragraph_snapshot(
                 "runs per paragraph", MAX_DOCX_RUNS_PER_PARAGRAPH
             )
         run_snapshot = extract_docx_run_snapshot(
-            run,
-            style_map=style_map,
-            paragraph_style_snapshot=style_snapshot,
+            run, style_map=style_map, paragraph_style_snapshot=style_snapshot
         )
         if run_snapshot["text"] or any(
             run_snapshot[key] is not None

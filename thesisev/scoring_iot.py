@@ -6,7 +6,7 @@ from typing import Any
 
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
-from thesisev.scoring import build_criterion
+from thesisev.rubric_utils import build_criterion
 from thesisev.scoring_content import count_terms, ratio_from_thresholds
 from thesisev.scoring_format import (
     extract_format_rules,

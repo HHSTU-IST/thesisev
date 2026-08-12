@@ -107,9 +107,7 @@ def create_chat_model(config: ModelConfig):
     if config.base_url_env and os.getenv(config.base_url_env):
         extra_kwargs["base_url"] = os.getenv(config.base_url_env)
     return init_chat_model(
-        model=config.model,
-        model_provider=config.provider,
-        **extra_kwargs,
+        model=config.model, model_provider=config.provider, **extra_kwargs
     )
 
 

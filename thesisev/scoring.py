@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,11 +11,34 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from thesisev.llm import ModelConfig, create_chat_model
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
+from thesisev.rubric_utils import (
+    RubricItem,
+    ScoreCriterion,
+    build_criterion,
+    merge_rubric_items,
+    normalize_criterion_name,
+    normalize_rubric_items,
+    normalize_rubric_payload,
+    parse_score_value,
+)
+from thesisev.scoring_content import (
+    score_experiment_analysis,
+    score_innovation,
+    score_research_argument,
+    score_topic_workload,
+    score_translation,
+    score_writing_quality,
+)
+from thesisev.scoring_format import (
+    extract_format_rules,
+    format_expected_value,
+    get_rule_expected,
+    normalize_format_spec_payload,
+    parse_float_value,
+)
 
 DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
-FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
-    "score_report_iot.json": "score_report_iot_f.json",
-}
+FORMAT_RUBRIC_BY_SCORE_RUBRIC = {"score_report_iot.json": "score_report_iot_f.json"}
 REQUIRED_CRITERIA = (
     "选题及工作量",
     "调查论证",
@@ -27,36 +49,25 @@ REQUIRED_CRITERIA = (
 )
 
 
-@dataclass(slots=True)
-class ScoreCriterion:
-    """Per-criterion score with evidence and improvement hints."""
-
-    key: str
-    name: str
-    score: float
-    max_score: float
-    standards: list[str] = field(default_factory=list)
-    evaluation: str = ""
-    evidence: list[str] = field(default_factory=list)
-    deductions: list[str] = field(default_factory=list)
-    suggestions: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize the criterion to a JSON-friendly dictionary."""
-
-        return asdict(self)
-
-
-@dataclass(slots=True)
 class ScoreReport:
     """Normalized score report derived from rubric criteria."""
 
-    score: int
-    raw_score: float
-    raw_total: float
-    criteria: list[ScoreCriterion]
-    rubric_source: str
-    score_source: str
+    def __init__(
+        self,
+        *,
+        score: int,
+        raw_score: float,
+        raw_total: float,
+        criteria: list[ScoreCriterion],
+        rubric_source: str,
+        score_source: str,
+    ) -> None:
+        self.score = score
+        self.raw_score = raw_score
+        self.raw_total = raw_total
+        self.criteria = criteria
+        self.rubric_source = rubric_source
+        self.score_source = score_source
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the report to a JSON-friendly dictionary."""
@@ -69,16 +80,6 @@ class ScoreReport:
             "score_source": self.score_source,
             "criteria": [criterion.to_dict() for criterion in self.criteria],
         }
-
-
-@dataclass(slots=True)
-class RubricItem:
-    """Normalized rubric item loaded from JSON or upload metadata."""
-
-    name: str
-    standards: list[str]
-    evaluation: str
-    max_score: float
 
 
 def calculate_score_report(
@@ -153,9 +154,7 @@ def calculate_score_report_with_llm(
     payload = parse_llm_json_response(response)
     criteria = normalize_llm_score_criteria(payload, rubric_items)
     return build_score_report(
-        criteria=criteria,
-        rubric_source=rubric_source,
-        score_source="llm",
+        criteria=criteria, rubric_source=rubric_source, score_source="llm"
     )
 
 
@@ -174,29 +173,18 @@ def calculate_score_report_local(
     item_by_name = {item.name: item for item in rubric_items}
     criteria = [
         score_topic_workload(
-            document,
-            topic_analysis,
-            technology_details,
-            item_by_name["选题及工作量"],
+            document, topic_analysis, technology_details, item_by_name["选题及工作量"]
         ),
         score_research_argument(document, keywords, item_by_name["调查论证"]),
         score_translation(document, item_by_name["译文"]),
         score_experiment_analysis(
-            document,
-            technology_details,
-            item_by_name["实验方案、分析与技能"],
+            document, technology_details, item_by_name["实验方案、分析与技能"]
         ),
-        score_writing_quality(
-            document,
-            writing_issues,
-            item_by_name["论文质量"],
-        ),
+        score_writing_quality(document, writing_issues, item_by_name["论文质量"]),
         score_innovation(document, technology_details, item_by_name["创新"]),
     ]
     return build_score_report(
-        criteria=criteria,
-        rubric_source=rubric_source,
-        score_source="local",
+        criteria=criteria, rubric_source=rubric_source, score_source="local"
     )
 
 
@@ -344,10 +332,7 @@ def score_item_locally(
 
 
 def build_score_report(
-    *,
-    criteria: list[ScoreCriterion],
-    rubric_source: str,
-    score_source: str,
+    *, criteria: list[ScoreCriterion], rubric_source: str, score_source: str
 ) -> ScoreReport:
     """Build a normalized score report from criterion scores."""
 
@@ -437,11 +422,7 @@ def build_score_prompt(
     """Build an LLM prompt that exposes content evidence only."""
 
     rubric_summary = [
-        {
-            "name": item.name,
-            "score": item.max_score,
-            "standards": item.standards,
-        }
+        {"name": item.name, "score": item.max_score, "standards": item.standards}
         for item in rubric_items
     ]
     payload = {
@@ -559,11 +540,7 @@ def parse_string_list(value: Any) -> list[str]:
 
 
 def validate_llm_deductions(
-    *,
-    criterion_name: str,
-    score: float,
-    max_score: float,
-    deductions: list[str],
+    *, criterion_name: str, score: float, max_score: float, deductions: list[str]
 ) -> None:
     """Require LLM scoring to explain every non-full score."""
 
@@ -572,319 +549,8 @@ def validate_llm_deductions(
         raise ValueError(msg)
 
 
-def deduplicate_preserving_order(values: list[str]) -> list[str]:
-    """Return a list with duplicates removed while keeping first-seen order."""
-
-    seen: set[str] = set()
-    deduplicated: list[str] = []
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        deduplicated.append(value)
-    return deduplicated
-
-
-def score_topic_workload(
-    document: ThesisDocument,
-    topic_analysis: dict[str, Any],
-    technology_details: list[TechnologyStackItem],
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score topic value, workload, and overall completeness."""
-
-    from thesisev.scoring_content import score_topic_workload as impl
-
-    return impl(document, topic_analysis, technology_details, rubric_item)
-
-
-def score_research_argument(
-    document: ThesisDocument,
-    keywords: list[str],
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score literature use and argumentation signals."""
-
-    from thesisev.scoring_content import score_research_argument as impl
-
-    return impl(document, keywords, rubric_item)
-
-
-def score_translation(
-    document: ThesisDocument,
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score Chinese-English abstract translation completeness."""
-
-    from thesisev.scoring_content import score_translation as impl
-
-    return impl(document, rubric_item)
-
-
-def score_experiment_analysis(
-    document: ThesisDocument,
-    technology_details: list[TechnologyStackItem],
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score design, data, analysis, feasibility, and benefit signals."""
-
-    from thesisev.scoring_content import score_experiment_analysis as impl
-
-    return impl(document, technology_details, rubric_item)
-
-
-def score_writing_quality(
-    document: ThesisDocument,
-    writing_issues: list[Issue],
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score writing quality from locally detected writing issues."""
-
-    from thesisev.scoring_content import score_writing_quality as impl
-
-    return impl(document, writing_issues, rubric_item)
-
-
-def score_innovation(
-    document: ThesisDocument,
-    technology_details: list[TechnologyStackItem],
-    rubric_item: RubricItem,
-) -> ScoreCriterion:
-    """Score innovation and application-value signals."""
-
-    from thesisev.scoring_content import score_innovation as impl
-
-    return impl(document, technology_details, rubric_item)
-
-
-def extract_format_rules(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import extract_format_rules as impl
-
-    return impl(*args, **kwargs)
-
-
-def summarize_format_spec(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import summarize_format_spec as impl
-
-    return impl(*args, **kwargs)
-
-
-def score_format_rules(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import score_format_rules as impl
-
-    return impl(*args, **kwargs)
-
-
-def build_format_suggestion(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import build_format_suggestion as impl
-
-    return impl(*args, **kwargs)
-
-
-def format_expected_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import format_expected_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def format_expected_items(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import format_expected_items as impl
-
-    return impl(*args, **kwargs)
-
-
-def evaluate_docx_expected_rule(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import evaluate_docx_expected_rule as impl
-
-    return impl(*args, **kwargs)
-
-
-def build_rule_suggestion(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import build_rule_suggestion as impl
-
-    return impl(*args, **kwargs)
-
-
-def select_docx_target_snapshot(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import select_docx_target_snapshot as impl
-
-    return impl(*args, **kwargs)
-
-
-def select_matching_paragraph(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import select_matching_paragraph as impl
-
-    return impl(*args, **kwargs)
-
-
-def lookup_docx_snapshot_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import lookup_docx_snapshot_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def resolve_from_first_paragraph(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import resolve_from_first_paragraph as impl
-
-    return impl(*args, **kwargs)
-
-
-def resolve_from_first_run(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import resolve_from_first_run as impl
-
-    return impl(*args, **kwargs)
-
-
-def resolve_from_first_table(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import resolve_from_first_table as impl
-
-    return impl(*args, **kwargs)
-
-
-def resolve_from_first_section(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import resolve_from_first_section as impl
-
-    return impl(*args, **kwargs)
-
-
-def compare_docx_expected_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import compare_docx_expected_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def compare_numeric_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import compare_numeric_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def compare_length_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import compare_length_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def parse_flexible_numeric_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import parse_flexible_numeric_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def parse_length_to_points(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import parse_length_to_points as impl
-
-    return impl(*args, **kwargs)
-
-
-def normalize_docx_expected_token(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import normalize_docx_expected_token as impl
-
-    return impl(*args, **kwargs)
-
-
-def format_docx_expected_scalar(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import format_docx_expected_scalar as impl
-
-    return impl(*args, **kwargs)
-
-
-def normalize_string_list(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import normalize_string_list as impl
-
-    return impl(*args, **kwargs)
-
-
-def parse_optional_float(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import parse_optional_float as impl
-
-    return impl(*args, **kwargs)
-
-
-def normalize_rule_check(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import normalize_rule_check as impl
-
-    return impl(*args, **kwargs)
-
-
-def get_rule_expected(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import get_rule_expected as impl
-
-    return impl(*args, **kwargs)
-
-
-def parse_float_value(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import parse_float_value as impl
-
-    return impl(*args, **kwargs)
-
-
-def normalize_format_spec_payload(*args, **kwargs):
-    """Compatibility wrapper for :mod:`thesisev.scoring_format`."""
-
-    from thesisev.scoring_format import normalize_format_spec_payload as impl
-
-    return impl(*args, **kwargs)
-
-
 def resolve_rubric_items(
-    *,
-    rubric: dict[str, Any] | None,
-    rubric_filename: str,
+    *, rubric: dict[str, Any] | None, rubric_filename: str
 ) -> tuple[list[RubricItem], str]:
     """Resolve rubric items from upload metadata or bundled config."""
 
@@ -894,8 +560,7 @@ def resolve_rubric_items(
     )
     if rubric and rubric.get("items"):
         return merge_rubric_items(
-            default_items,
-            normalize_rubric_items(rubric["items"], require_all=False),
+            default_items, normalize_rubric_items(rubric["items"], require_all=False)
         ), rubric.get("source_name", "uploaded_rubric.json")
     return default_items, rubric_filename
 
@@ -952,179 +617,3 @@ def build_format_standards(rules: list[dict[str, Any]]) -> list[str]:
         elif label:
             standards.append(label)
     return standards
-
-
-def normalize_rubric_payload(payload: Any) -> list[RubricItem]:
-    """Normalize a bundled rubric JSON payload."""
-
-    if not isinstance(payload, dict):
-        msg = "score rubric JSON must be an object"
-        raise ValueError(msg)
-    return normalize_rubric_items(
-        [
-            {"criterion": criterion, **parse_rubric_value(value)}
-            for criterion, value in payload.items()
-        ]
-    )
-
-
-def parse_rubric_item_payload(item: dict[str, Any]) -> dict[str, Any]:
-    """Normalize a single rubric item payload."""
-
-    return {
-        "criterion": item.get("criterion", ""),
-        "score": item.get("score", 0),
-        "standard": item.get("standard", item.get("standards", [])),
-    }
-
-
-def normalize_rubric_items(
-    items: list[dict[str, Any]], *, require_all: bool = True
-) -> list[RubricItem]:
-    """Normalize rubric item dictionaries preserving configured order."""
-
-    normalized = [
-        RubricItem(
-            name=normalize_criterion_name(item.get("criterion", "")),
-            standards=parse_standards(item.get("standard", item.get("standards", []))),
-            evaluation=str(item.get("evaluation") or "llm").strip().lower(),
-            max_score=parse_score_value(item.get("score", 0)),
-        )
-        for item in items
-    ]
-    if require_all and not normalized:
-        msg = "score rubric must contain at least one criterion"
-        raise ValueError(msg)
-    return normalized
-
-
-def merge_rubric_items(
-    default_items: list[RubricItem], uploaded_items: list[RubricItem]
-) -> list[RubricItem]:
-    """Overlay uploaded rubric scores onto default criteria."""
-
-    item_by_name = {item.name: item for item in default_items}
-    for item in uploaded_items:
-        if item.name in item_by_name:
-            item_by_name[item.name] = item
-    return [item_by_name[item.name] for item in default_items]
-
-
-def parse_rubric_value(value: Any) -> dict[str, Any]:
-    """Parse either flat score values or nested standard-score objects."""
-
-    if isinstance(value, int | float) and not isinstance(value, bool):
-        return {"score": float(value), "standard": []}
-    if isinstance(value, dict):
-        score = value.get("score", value.get("分数"))
-        standard = value.get("standard", value.get("standards", value.get("标准", [])))
-        return {
-            "score": parse_score_value(score),
-            "standard": parse_standards(standard),
-        }
-    msg = "score rubric item must be numeric or an object with score"
-    raise ValueError(msg)
-
-
-def parse_score_value(value: Any) -> float:
-    """Parse a numeric score value."""
-
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        msg = "rubric score must be numeric"
-        raise ValueError(msg)
-    return float(value)
-
-
-def parse_standards(value: Any) -> list[str]:
-    """Parse rubric standard descriptions."""
-
-    if value in (None, ""):
-        return []
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
-
-
-def normalize_criterion_name(criterion: Any) -> str:
-    """Normalize criterion labels to their top-level rubric name."""
-
-    if not isinstance(criterion, str) or not criterion.strip():
-        msg = "rubric criterion must be a non-empty string"
-        raise ValueError(msg)
-    return re.split(r"[：:]", criterion.strip(), maxsplit=1)[0].strip()
-
-
-def build_criterion(
-    *,
-    key: str,
-    rubric_item: RubricItem,
-    score: float,
-    evidence: list[str],
-    deductions: list[str],
-    suggestions: list[str],
-) -> ScoreCriterion:
-    """Clamp and round a criterion score."""
-
-    clamped_score = round(max(0.0, min(rubric_item.max_score, score)), 2)
-    return ScoreCriterion(
-        key=key,
-        name=rubric_item.name,
-        score=clamped_score,
-        max_score=rubric_item.max_score,
-        standards=rubric_item.standards,
-        evaluation="local",
-        evidence=evidence,
-        deductions=ensure_deduction_visibility(
-            score=clamped_score,
-            max_score=rubric_item.max_score,
-            deductions=deductions,
-        ),
-        suggestions=suggestions,
-    )
-
-
-def ensure_deduction_visibility(
-    *, score: float, max_score: float, deductions: list[str]
-) -> list[str]:
-    """Ensure non-full scores always expose a visible deduction reason."""
-
-    if deductions or score >= max_score:
-        return deductions
-    lost_points = round(max_score - score, 2)
-    return [f"未达到满分，扣 {lost_points:g} 分"]
-
-
-def ratio_from_thresholds(
-    value: float, thresholds: tuple[tuple[float, float], ...]
-) -> float:
-    """Return the first ratio whose threshold is met."""
-
-    from thesisev.scoring_content import ratio_from_thresholds as impl
-
-    return impl(value, thresholds)
-
-
-def has_any(text: str, terms: tuple[str, ...]) -> bool:
-    """Return whether any term appears in text."""
-
-    from thesisev.scoring_content import has_any as impl
-
-    return impl(text, terms)
-
-
-def count_terms(text: str, terms: tuple[str, ...]) -> int:
-    """Count simple literal term occurrences."""
-
-    from thesisev.scoring_content import count_terms as impl
-
-    return impl(text, terms)
-
-
-def count_citations(text: str) -> int:
-    """Count Arabic-numbered citation markers in Chinese technical papers."""
-
-    from thesisev.scoring_content import count_citations as impl
-
-    return impl(text)
