@@ -72,12 +72,9 @@ def run_deep_review(
         logger.warning("deep review skipped after LLM failure: %s", exc)
         return []
     deep_issues = [
-        to_deep_review_issue(document=document, finding=finding)
-        for finding in findings
+        to_deep_review_issue(document=document, finding=finding) for finding in findings
     ]
-    seen = {
-        (issue.category, issue.message) for issue in (existing_issues or [])
-    }
+    seen = {(issue.category, issue.message) for issue in (existing_issues or [])}
     added: list[Issue] = []
     for issue in deep_issues:
         key = (issue.category, issue.message)
@@ -120,10 +117,10 @@ def build_deep_review_prompt(document: ThesisDocument) -> str:
         '"message":"一句话指出问题","suggestion":"修改建议",'
         '"section":"对应章节标题或编号"}...]}\n'
         "要求：\n"
-        "1. type 只能是 \"logic\" 或 \"tone\"："
+        '1. type 只能是 "logic" 或 "tone"：'
         "logic 针对前后数据/结论矛盾、论证链缺失、结论无实验支撑、章节衔接断裂；"
         "tone 针对口语化或主观化表述（如程度词滥用、随意连接词）及其上下文是否确实不妥。\n"
-        "2. severity 只能是 \"low\" / \"medium\" / \"high\"。\n"
+        '2. severity 只能是 "low" / "medium" / "high"。\n'
         "3. message 必须能对应到正文证据，空泛的套话不要列；"
         "每类最多 3 条，没有则返回空数组。\n"
         "4. 不要评价格式、排版、标点；不要给出分数。\n"
@@ -180,9 +177,7 @@ def normalize_deep_review_findings(payload: dict[str, Any]) -> list[dict[str, An
     return findings
 
 
-def to_deep_review_issue(
-    *, document: ThesisDocument, finding: dict[str, Any]
-) -> Issue:
+def to_deep_review_issue(*, document: ThesisDocument, finding: dict[str, Any]) -> Issue:
     """Map one normalized LLM finding onto an Issue for the existing UI."""
 
     finding_type = finding["type"]
@@ -199,9 +194,7 @@ def to_deep_review_issue(
         paragraph_index=-1,
         sentence_index=-1,
         matched_text=finding.get("section", ""),
-        excerpt=_clip(
-            section.content if section else finding["message"], limit=120
-        ),
+        excerpt=_clip(section.content if section else finding["message"], limit=120),
     )
 
 

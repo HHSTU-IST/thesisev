@@ -20,7 +20,12 @@ thesisev = "thesisev.cli:main"
 thesisev-api = "thesisev.api:run_api"
 
 [dependency-groups]
-dev = ["pytest>=8.3", "pytest-cov>=6.0"]
+dev = [
+  "pyrefly>=1.2.0",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.16",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -87,3 +92,18 @@ case-sensitive = true
 combine-as-imports = true
 force-wrap-aliases = true
 order-by-type = true
+
+[tool.pyrefly]
+preset = "strict"
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
+project-excludes = [
+    ".venv/**",
+    ".workbuddy/**",
+    "data/**",
+    "build/**",
+    "dist/**",
+    "*.egg-info/**",
+]

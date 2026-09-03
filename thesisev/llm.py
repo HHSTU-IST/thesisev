@@ -145,7 +145,11 @@ def create_deepseek_chat_model(config: ModelConfig) -> ChatOpenAI:
 
 
 def invoke_chat_model_with_retry(
-    model, messages, *, attempts: int = 3, base_delay: float = 1.0
+    model: Any,
+    messages: Any,
+    *,
+    attempts: int = 3,
+    base_delay: float = 1.0,
 ) -> Any:
     """Invoke a chat model with exponential-backoff retries.
 

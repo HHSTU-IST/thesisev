@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
-from thesisev.rubric_utils import build_criterion
+from thesisev.rubric_utils import RubricItem, ScoreCriterion, build_criterion
 from thesisev.scoring_content import count_terms, ratio_from_thresholds
 from thesisev.scoring_format import score_format_compliance
 
@@ -38,8 +38,8 @@ def score_iot_item_locally(
     writing_issues: list[Issue],
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None,
-    rubric_item,
-):
+    rubric_item: RubricItem,
+) -> ScoreCriterion | None:
     """Score a configured IoT report rubric item, if this module owns it."""
 
     if rubric_item.name == "调研背景与意义":
@@ -65,7 +65,9 @@ def score_iot_item_locally(
     return None
 
 
-def score_iot_background(document: ThesisDocument, rubric_item):
+def score_iot_background(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
     """Score IoT report background and significance."""
 
     text = document.cleaned_text
@@ -83,7 +85,9 @@ def score_iot_background(document: ThesisDocument, rubric_item):
     )
 
 
-def score_iot_method(document: ThesisDocument, rubric_item):
+def score_iot_method(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
     """Score IoT report method and thinking."""
 
     text = document.cleaned_text
@@ -102,8 +106,10 @@ def score_iot_method(document: ThesisDocument, rubric_item):
 
 
 def score_iot_software(
-    document: ThesisDocument, technology_details: list[TechnologyStackItem], rubric_item
-):
+    document: ThesisDocument,
+    technology_details: list[TechnologyStackItem],
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
     """Score software selection."""
 
     text = document.cleaned_text
@@ -127,8 +133,10 @@ def score_iot_software(
 
 
 def score_iot_hardware(
-    document: ThesisDocument, technology_details: list[TechnologyStackItem], rubric_item
-):
+    document: ThesisDocument,
+    technology_details: list[TechnologyStackItem],
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
     """Score hardware selection."""
 
     text = document.cleaned_text
@@ -153,7 +161,7 @@ def score_iot_hardware(
     )
 
 
-def score_iot_cost(document: ThesisDocument, rubric_item):
+def score_iot_cost(document: ThesisDocument, rubric_item: RubricItem) -> ScoreCriterion:
     """Score cost accounting."""
 
     text = document.cleaned_text
@@ -171,7 +179,9 @@ def score_iot_cost(document: ThesisDocument, rubric_item):
     )
 
 
-def score_iot_outlook(document: ThesisDocument, rubric_item):
+def score_iot_outlook(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
     """Score future outlook."""
 
     text = document.cleaned_text
@@ -189,7 +199,9 @@ def score_iot_outlook(document: ThesisDocument, rubric_item):
     )
 
 
-def score_iot_word_count(document: ThesisDocument, rubric_item):
+def score_iot_word_count(
+    document: ThesisDocument, rubric_item: RubricItem
+) -> ScoreCriterion:
     """Score report length."""
 
     word_count = document.total_word_count
@@ -207,8 +219,10 @@ def score_iot_word_count(document: ThesisDocument, rubric_item):
 
 
 def score_iot_writing(
-    document: ThesisDocument, writing_issues: list[Issue], rubric_item
-):
+    document: ThesisDocument,
+    writing_issues: list[Issue],
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
     """Score report writing quality."""
 
     issue_penalty = sum(
@@ -231,8 +245,8 @@ def score_iot_format(
     document: ThesisDocument,
     format_issues: list[Issue],
     format_requirements: dict[str, Any] | None,
-    rubric_item,
-):
+    rubric_item: RubricItem,
+) -> ScoreCriterion:
     """Score format compliance for the IoT report preset."""
 
     return score_format_compliance(

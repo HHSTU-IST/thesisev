@@ -174,7 +174,7 @@ def parse_rubric_standard(standard: Any) -> list[str]:
 def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
     """Parse one rubric item from flat or nested JSON shapes."""
 
-    item = {"criterion": parse_rubric_criterion(criterion)}
+    item: dict[str, Any] = {"criterion": parse_rubric_criterion(criterion)}
     if isinstance(value, dict):
         item["score"] = parse_rubric_score(value.get("score", value.get("分数")))
         item["standard"] = parse_rubric_standard(
@@ -283,7 +283,7 @@ def stringify_format_requirement_value(value: Any) -> str:
         return "true" if value else "false"
     if value is None:
         return "null"
-    if isinstance(value, list | dict):
+    if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False)
     return str(value)
 
@@ -350,7 +350,7 @@ def normalize_structured_format_requirements(
             if not isinstance(rule, dict):
                 continue
             rule_count += 1
-            check = rule.get("check", {})
+            check: dict[str, Any] = rule.get("check", {})
             if not isinstance(check, dict):
                 check = {}
             display_items.append(

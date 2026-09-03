@@ -18,8 +18,10 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from thesisev.analyzers import (
+    TopicAnalysis,
     annotate_report_topic_relevance,
     annotate_section_statistics,
     annotate_topic_relevance,
@@ -33,13 +35,14 @@ from thesisev.analyzers import (
 from thesisev.commentary import generate_comment
 from thesisev.deep_review import run_deep_review
 from thesisev.llm import ModelConfig, build_model_config
-from thesisev.models import EvaluationResult, ThesisDocument
+from thesisev.models import EvaluationResult, Issue, ThesisDocument
 from thesisev.parser import load_document
 from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
 from thesisev.rubric_utils import (
     normalize_format_requirements_payload,
     normalize_rubric_payload,
     normalize_structured_format_requirements,
+    parse_score_value,
 )
 from thesisev.scoring import (
     DEFAULT_THESIS_TECH_RUBRIC,
@@ -59,11 +62,11 @@ class UploadRequestTooLarge(Exception):
 class EvaluateUploadSizeLimitMiddleware:
     """Limit /evaluate/upload request bodies before multipart parsing."""
 
-    def __init__(self, app, *, max_body_bytes: int) -> None:
+    def __init__(self, app: ASGIApp, *, max_body_bytes: int) -> None:
         self.app = app
         self.max_body_bytes = max_body_bytes
 
-    async def __call__(self, scope, receive, send) -> None:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or scope.get("path") != "/evaluate/upload":
             await self.app(scope, receive, send)
             return
@@ -75,7 +78,7 @@ class EvaluateUploadSizeLimitMiddleware:
         received = 0
         response_started = False
 
-        async def limited_receive():
+        async def limited_receive() -> Message:
             nonlocal received
             message = await receive()
             if message["type"] == "http.request":
@@ -84,7 +87,7 @@ class EvaluateUploadSizeLimitMiddleware:
                     raise UploadRequestTooLarge
             return message
 
-        async def limited_send(message) -> None:
+        async def limited_send(message: Message) -> None:
             nonlocal response_started
             if message["type"] == "http.response.start":
                 response_started = True
@@ -97,7 +100,7 @@ class EvaluateUploadSizeLimitMiddleware:
                 raise
             await self.send_too_large_response(scope, receive, send)
 
-    def is_oversized_by_header(self, scope) -> bool:
+    def is_oversized_by_header(self, scope: Scope) -> bool:
         """Check Content-Length when the client provides one."""
 
         headers = dict(scope.get("headers") or [])
@@ -109,7 +112,9 @@ class EvaluateUploadSizeLimitMiddleware:
         except ValueError:
             return False
 
-    async def send_too_large_response(self, scope, receive, send) -> None:
+    async def send_too_large_response(
+        self, scope: Scope, receive: Receive, send: Send
+    ) -> None:
         """Send a standard 413 response."""
 
         response = JSONResponse(
@@ -507,7 +512,9 @@ def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
         ]
     return {
         "items": items,
-        "total_score": round(sum(item["score"] for item in items), 4),
+        "total_score": round(
+            sum(parse_score_value(item["score"]) for item in items), 4
+        ),
         "source_name": filename,
     }
 
@@ -610,7 +617,7 @@ def run_api() -> None:
 
 def build_topic_analysis(
     document: ThesisDocument, *, rubric_filename: str, rubric: dict[str, Any] | None
-) -> dict[str, object]:
+) -> TopicAnalysis:
     """Build topic analysis using report rubric standards when available."""
 
     if rubric_filename.startswith("score_report_"):
@@ -648,7 +655,7 @@ def evaluate_document(
     topic_analysis = build_topic_analysis(
         document, rubric_filename=rubric_filename, rubric=rubric
     )
-    statistics = build_statistics(document, topic_analysis=topic_analysis)
+    statistics = build_statistics(document, topic_analysis=dict(topic_analysis))
     issue_groups = detect_issue_groups(document)
     format_issues = issue_groups.format_issues
     writing_issues = issue_groups.writing_issues
@@ -659,7 +666,7 @@ def evaluate_document(
     technology_groups = split_technology_stack(technology_details)
     content_context = build_content_context(
         document=document,
-        topic_analysis=topic_analysis,
+        topic_analysis=dict(topic_analysis),
         keywords=keywords,
         technology_details=technology_details,
     )
@@ -672,7 +679,7 @@ def evaluate_document(
     )
     score_report = calculate_score_report(
         document=document,
-        topic_analysis=topic_analysis,
+        topic_analysis=dict(topic_analysis),
         format_issues=format_issues,
         writing_issues=writing_issues,
         content_context=content_context,
@@ -695,14 +702,12 @@ def evaluate_document(
     )
     if runtime_model_config.is_available():
         deep_issues = run_deep_review(
-            document=document,
-            model_config=runtime_model_config,
-            existing_issues=issues,
+            document=document, model_config=runtime_model_config, existing_issues=issues
         )
         if deep_issues:
             issues = [*issues, *deep_issues]
     else:
-        deep_issues = []
+        deep_issues: list[Issue] = []
     return EvaluationResult(
         document=document,
         statistics=statistics,
@@ -733,10 +738,18 @@ def evaluate_document(
                 "format_evaluation": "local",
                 "writing_detection": "local",
                 "writing_evaluation": "local",
+                "logic_detection": "local",
+                "logic_deep_review": (
+                    "llm" if runtime_model_config.is_available() else "skipped"
+                ),
                 "content_evaluation": comment_source,
                 "llm_input": "content_context_only",
             },
             "model": runtime_model_config.to_metadata(),
+            "deep_review": {
+                "source": "llm" if runtime_model_config.is_available() else "skipped",
+                "added_count": len(deep_issues),
+            },
         },
     )
 
@@ -750,7 +763,7 @@ def structure_document(path: str | Path) -> ThesisDocument:
     return document
 
 
-def append_history(result) -> None:
+def append_history(result: EvaluationResult) -> None:
     """Append a compact evaluation summary to local history.
 
     Reads, inserts, and writes happen under a process-wide lock, and the file
@@ -784,7 +797,7 @@ def read_history_unlocked() -> list[dict[str, Any]]:
     return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
 
 
-def build_history_entry(result) -> dict[str, Any]:
+def build_history_entry(result: EvaluationResult) -> dict[str, Any]:
     """Build a compact serialized history entry."""
 
     return {

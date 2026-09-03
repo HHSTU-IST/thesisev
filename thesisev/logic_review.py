@@ -19,7 +19,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from thesisev.models import Issue, Paragraph, Section, ThesisDocument
+from thesisev.models import Issue, Section, ThesisDocument
 
 CATEGORY = "逻辑问题"
 
@@ -49,7 +49,9 @@ MAX_CONSISTENCY_ISSUES = 8
 def detect_logic_issues(document: ThesisDocument) -> list[Issue]:
     """Detect cross-section argument-chain and data-consistency issues."""
 
-    sections = [section for section in document.sections if not section.skip_format_check]
+    sections = [
+        section for section in document.sections if not section.skip_format_check
+    ]
     if len(sections) < MIN_SECTIONS_FOR_LOGIC:
         return []
 
@@ -113,9 +115,7 @@ def _detect_conflicting_metric_claims(
     if len(claims) < MIN_CLAIMS_FOR_CONSISTENCY:
         return []
 
-    grouped: dict[str, dict[str, set[str]]] = defaultdict(
-        lambda: defaultdict(set)
-    )
+    grouped: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
     for claim in claims:
         core = _metric_core(claim["metric"])
         grouped[core][claim["value"]].add(claim["section_title"])
@@ -128,9 +128,7 @@ def _detect_conflicting_metric_claims(
         }
         if len(distinct_values) < 2 or len(distinct_sections) < 2:
             continue
-        issues.extend(
-            _build_conflict_issues(core, values_by_value, distinct_sections)
-        )
+        issues.extend(_build_conflict_issues(core, values_by_value, distinct_sections))
         if len(issues) >= MAX_CONSISTENCY_ISSUES:
             break
     return issues
@@ -169,9 +167,7 @@ def _build_conflict_issues(
 ) -> list[Issue]:
     """Build a single issue describing the widest conflicting pair."""
 
-    ordered_values = sorted(
-        values_by_value, key=lambda value: _claim_number(value), reverse=True
-    )
+    ordered_values = sorted(values_by_value, key=_claim_number, reverse=True)
     lowest = ordered_values[-1]
     highest = ordered_values[0]
     if _claim_number(lowest) == _claim_number(highest):
@@ -198,9 +194,7 @@ def _build_conflict_issues(
             paragraph_index=-1,
             sentence_index=-1,
             matched_text=f"{core} {highest} / {lowest}",
-            excerpt=_clip(
-                f"相关章节：{section_names}（{highest} vs {lowest}）"
-            ),
+            excerpt=_clip(f"相关章节：{section_names}（{highest} vs {lowest}）"),
         )
     ]
 

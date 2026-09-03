@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from typing import Any, TypedDict
 
 import tiktoken
 
@@ -78,7 +79,7 @@ class LocalIssueGroups:
 
 
 def build_statistics(
-    document: ThesisDocument, *, topic_analysis: dict[str, object] | None = None
+    document: ThesisDocument, *, topic_analysis: dict[str, Any] | None = None
 ) -> list[Statistic]:
     """Build display statistics for level-two section content."""
 
@@ -126,6 +127,9 @@ def extract_keywords(document: ThesisDocument) -> list[str]:
 def extract_technology_details(document: ThesisDocument) -> list[TechnologyStackItem]:
     """Extract categorized technology names with keyword matching."""
 
+    def sort_key(item: TechnologyStackItem) -> tuple[str, str]:
+        return (item.category, item.name.lower())
+
     found: list[TechnologyStackItem] = []
     for entry in KEYWORDS_TECH:
         matched_terms = [
@@ -142,7 +146,7 @@ def extract_technology_details(document: ThesisDocument) -> list[TechnologyStack
                 matched_terms=sorted(set(matched_terms), key=str.lower),
             )
         )
-    return sorted(found, key=lambda item: (item.category, item.name.lower()))
+    return sorted(found, key=sort_key)
 
 
 def extract_technology_stack(document: ThesisDocument) -> list[str]:
@@ -379,9 +383,20 @@ def parse_report_standards(value: object) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+class TopicAnalysis(TypedDict, total=False):
+    """Topic relevance summary shared by the analyzer and evaluation API."""
+
+    topic_keywords: list[str]
+    relevant_word_count: int
+    document_ratio: float
+    earned_score: float
+    total_score: float
+    source: str
+
+
 def annotate_report_topic_relevance(
-    document: ThesisDocument, rubric_items: list[dict[str, object]]
-) -> dict[str, object]:
+    document: ThesisDocument, rubric_items: list[dict[str, Any]]
+) -> TopicAnalysis:
     """Annotate report sections using configured rubric-standard coverage."""
 
     for paragraph in document.paragraphs:
@@ -410,7 +425,11 @@ def annotate_report_topic_relevance(
         standards = parse_report_standards(
             rubric_item.get("standard", rubric_item.get("standards", []))
         )
-        max_score = float(rubric_item.get("score", rubric_item.get("max_score", 0)))
+        max_score_value = rubric_item.get("score", rubric_item.get("max_score", 0))
+        if isinstance(max_score_value, (int, float)):
+            max_score = float(max_score_value)
+        else:
+            max_score = 0.0
         total_score += max_score
         standard_keywords = [
             extract_standard_keywords(standard) for standard in standards
@@ -459,7 +478,7 @@ def annotate_report_topic_relevance(
     }
 
 
-def annotate_topic_relevance(document: ThesisDocument) -> dict[str, object]:
+def annotate_topic_relevance(document: ThesisDocument) -> TopicAnalysis:
     """Annotate paragraphs and sections with topic relevance information."""
 
     topic_keywords = extract_topic_keywords(document)
@@ -505,9 +524,17 @@ def annotate_section_topic_relevance(
     section.topic_matched_keywords = sorted(matched_keywords)
 
 
+class ParagraphTopicRelevance(TypedDict):
+    """Typed result of one paragraph topic-relevance analysis."""
+
+    score: float
+    matched_keywords: list[str]
+    is_relevant: bool
+
+
 def analyze_paragraph_topic_relevance(
     paragraph: Paragraph, topic_keywords: list[str]
-) -> dict[str, object]:
+) -> ParagraphTopicRelevance:
     """Analyze a paragraph's topic relevance using keyword coverage."""
 
     if not topic_keywords:
@@ -745,7 +772,10 @@ def split_technology_stack(
         "编程语言",
         "通信协议",
     }
-    grouped = {"software_technology_stack": [], "hardware_technology_stack": []}
+    grouped: dict[str, list[str]] = {
+        "software_technology_stack": [],
+        "hardware_technology_stack": [],
+    }
     for item in technology_details:
         if item.category in software_categories:
             grouped["software_technology_stack"].append(item.name)
@@ -793,13 +823,13 @@ def extract_tiktoken_keywords(text: str, top_k: int) -> list[str]:
         for keyword in extract_phrase_candidates(segment):
             candidate_counts[keyword] += 1
 
+    def sort_key(item: tuple[str, int]) -> tuple[float, int, str]:
+        keyword, frequency = item
+        return (keyword_candidate_score(keyword, frequency), len(keyword), keyword)
+
     ranked_candidates = sorted(
         candidate_counts.items(),
-        key=lambda item: (
-            keyword_candidate_score(item[0], item[1]),
-            len(item[0]),
-            item[0],
-        ),
+        key=sort_key,
         reverse=True,
     )
     selected: list[str] = []

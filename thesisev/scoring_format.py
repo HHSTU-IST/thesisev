@@ -448,9 +448,11 @@ def evaluate_docx_paragraph_rule(
         return True, f"{label}: {summary}"
     return (
         False,
-        f"{label}: 合规 {compliant}/{total} 段（{ratio * 100:.1f}%），"
-        f"期望至少 {DOCX_PARAGRAPH_COMPLIANCE_RATIO * 100:g}% 合规；"
-        f"反例：{'；'.join(failures)}",
+        (
+            f"{label}: 合规 {compliant}/{total} 段（{ratio * 100:.1f}%），"
+            f"期望至少 {DOCX_PARAGRAPH_COMPLIANCE_RATIO * 100:g}% 合规；"
+            f"反例：{'；'.join(failures)}"
+        ),
     )
 
 
