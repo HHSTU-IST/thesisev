@@ -9,6 +9,12 @@ from pathlib import Path
 
 from thesisev.analyzers import split_technology_stack
 from thesisev.api import evaluate_document, resolve_preset_files, structure_document
+from thesisev.models import (
+    EvaluationResult,
+    Section,
+    TechnologyStackItem,
+    ThesisDocument,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -95,7 +101,7 @@ def main() -> int:
     return 0
 
 
-def print_report(result) -> None:
+def print_report(result: EvaluationResult) -> None:
     """Print a human-readable evaluation report."""
 
     print(f"Title: {result.document.title}")
@@ -143,7 +149,9 @@ def print_report(result) -> None:
         )
 
 
-def build_technology_stack_lines(technology_details) -> list[str]:
+def build_technology_stack_lines(
+    technology_details: list[TechnologyStackItem],
+) -> list[str]:
     """Build software and hardware technology-stack lines for the CLI."""
 
     grouped = split_technology_stack(technology_details)
@@ -152,7 +160,7 @@ def build_technology_stack_lines(technology_details) -> list[str]:
     return [f"- 软件技术栈: {software}", f"- 硬件技术栈: {hardware}"]
 
 
-def print_structure(document) -> None:
+def print_structure(document: ThesisDocument) -> None:
     """Print a human-readable structure report."""
 
     print(f"Title: {document.title}")
@@ -178,7 +186,7 @@ def print_structure(document) -> None:
         print_section_tree(section)
 
 
-def print_section_tree(section, indent: int = 0) -> None:
+def print_section_tree(section: Section, indent: int = 0) -> None:
     """Print a section and its children recursively."""
 
     prefix = "  " * indent

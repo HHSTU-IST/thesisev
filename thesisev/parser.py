@@ -68,7 +68,7 @@ def load_document(path: str | Path) -> ThesisDocument:
         title = extract_document_title(front_matter, fallback=source_path.stem)
     else:
         raw_text = read_source_text(source_path)
-        format_snapshot = {}
+        format_snapshot: dict[str, Any] = {}
         cleaned_text = clean_text(raw_text)
         lines = [line.strip() for line in cleaned_text.splitlines()]
         title = next((line for line in lines if line), source_path.stem)
@@ -401,7 +401,7 @@ def resolve_docx_style_map(
             return resolved[style_id]
         style = style_map.get(style_id, {})
         base_style_id = style.get("based_on")
-        base = resolve_style(base_style_id) if base_style_id else {}
+        base: dict[str, Any] = resolve_style(base_style_id) if base_style_id else {}
         merged = {
             "name": style.get("name") or base.get("name"),
             "based_on": base_style_id,
@@ -525,7 +525,7 @@ def extract_docx_paragraph_snapshot(
             runs.append(run_snapshot)
 
     text = normalize_docx_paragraph_text(getattr(paragraph, "text", ""))
-    primary_run = next(
+    primary_run: dict[str, Any] = next(
         (run for run in runs if run.get("text")), runs[0] if runs else {}
     )
     return {

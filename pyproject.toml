@@ -3,7 +3,7 @@ name = "thesisev"
 version = "0.1.0"
 description = "A thesis evaluation assistant for structure analysis, issue detection, and comment generation."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
   "fastapi>=0.136.3",
   "jinja2>=3.1.6",
@@ -21,10 +21,10 @@ thesisev-api = "thesisev.api:run_api"
 
 [dependency-groups]
 dev = [
-  "pyrefly>=1.2.0",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "ruff>=0.16",
+  "ty>=0.0.78",
 ]
 
 [build-system]
@@ -93,17 +93,5 @@ combine-as-imports = true
 force-wrap-aliases = true
 order-by-type = true
 
-[tool.pyrefly]
-preset = "strict"
-project-includes = [
-    "**/*.py*",
-    "**/*.ipynb",
-]
-project-excludes = [
-    ".venv/**",
-    ".workbuddy/**",
-    "data/**",
-    "build/**",
-    "dist/**",
-    "*.egg-info/**",
-]
+[tool.ty]
+python-version = "3.14"

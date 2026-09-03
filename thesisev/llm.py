@@ -16,7 +16,7 @@ from thesisev.paths import config_dir
 DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-PROVIDER_ENV_MAPPING = {}
+PROVIDER_ENV_MAPPING: dict[str, tuple[str | None, str | None]] = {}
 
 
 @dataclass(slots=True)

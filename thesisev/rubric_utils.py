@@ -185,8 +185,9 @@ def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
         if value.get("evaluation"):
             item["evaluation"] = str(value["evaluation"]).strip().lower()
         return item
+    empty_standards: list[str] = []
     item["score"] = parse_rubric_score(value)
-    item["standard"] = []
+    item["standard"] = empty_standards
     return item
 
 

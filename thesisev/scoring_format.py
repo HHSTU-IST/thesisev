@@ -341,10 +341,10 @@ def evaluate_docx_single_target_rule(
 
     label = str(rule.get("label") or rule.get("id") or "").strip()
     paths = {str(item.get("path", "")).strip() for item in expected}
-    tables = (
+    tables: list[Any] = (
         snapshot.get("tables", []) if isinstance(snapshot.get("tables"), list) else []
     )
-    sections = (
+    sections: list[Any] = (
         snapshot.get("sections", [])
         if isinstance(snapshot.get("sections"), list)
         else []
