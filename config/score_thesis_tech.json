@@ -1,5 +1,6 @@
 {
     "选题及工作量": {
+        "key": "topic_workload",
         "standard": [
             "选题有一定实际意义",
             "难易程度、工作量适宜"
@@ -7,6 +8,7 @@
         "score": 20
     },
     "调查论证": {
+        "key": "research_argument",
         "standard": [
             "引用文献与所在片段相关",
             "正文中的引用文献序号为顺序编号"
@@ -14,6 +16,7 @@
         "score": 10
     },
     "实验方案、分析与技能": {
+        "key": "experiment_analysis",
         "standard": [
             "实验方案科学合理",
             "数据采集、计算、处理正确",
@@ -24,6 +27,7 @@
         "score": 10
     },
     "论文质量": {
+        "key": "writing_quality",
         "standard": [
             "条理清楚，文理通顺",
             "用语符合技术规范",
@@ -32,6 +36,7 @@
         "score": 10
     },
     "英文摘要": {
+        "key": "translation",
         "standard": [
             "翻译准确",
             "语句通顺、流畅",
@@ -40,6 +45,7 @@
         "score": 5
     },
     "创新": {
+        "key": "innovation",
         "standard": [
             "有独特见解",
             "结论有一定应用价值"

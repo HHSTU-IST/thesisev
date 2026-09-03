@@ -5,16 +5,30 @@ from __future__ import annotations
 from typing import Any
 
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
-from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import build_criterion
 from thesisev.scoring_content import count_terms, ratio_from_thresholds
-from thesisev.scoring_format import (
-    extract_format_rules,
-    normalize_format_spec_payload,
-    score_format_rules,
-)
+from thesisev.scoring_format import score_format_compliance
 
 DEFAULT_IOT_FORMAT_RUBRIC = "score_report_iot_f.json"
+
+#: Item names this module's local scorers own, used by rubric self-checks to
+#: distinguish "intentionally name-routed" IoT items from unknown criteria.
+OWNED_IOT_ITEM_NAMES = frozenset(
+    {
+        "调研背景与意义",
+        "调研方法",
+        "调研方法和思路",
+        "软件架构和工具链",
+        "软件选型",
+        "硬件选型",
+        "产品规划与成本核算",
+        "成本核算",
+        "未来展望",
+        "篇幅",
+        "报告撰写",
+        "格式规范",
+    }
+)
 
 
 def score_iot_item_locally(
@@ -219,38 +233,12 @@ def score_iot_format(
     format_requirements: dict[str, Any] | None,
     rubric_item,
 ):
-    """Score format compliance."""
+    """Score format compliance for the IoT report preset."""
 
-    format_spec = load_json_resource(DEFAULT_IOT_FORMAT_RUBRIC)
-    format_spec = normalize_format_spec_payload(format_spec)
-    rules = extract_format_rules(format_spec)
-    if not rules:
-        raise ValueError("format rubric rules are empty")
-    summary = score_format_rules(
+    return score_format_compliance(
         document=document,
         format_issues=format_issues,
-        rules=rules,
         format_requirements=format_requirements,
-    )
-    format_count = (
-        len(format_requirements.get("items", [])) if format_requirements else 0
-    )
-    score = max(
-        0.0,
-        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["deduction"]),
-    )
-    criterion = build_criterion(
-        key="iot_format",
         rubric_item=rubric_item,
-        score=score,
-        evidence=[
-            f"格式规范来源 {DEFAULT_IOT_FORMAT_RUBRIC}",
-            f"格式要求条目 {format_count}",
-            f"格式问题 {len(format_issues)} 项",
-        ]
-        + summary["evidence"],
-        deductions=summary["deductions"],
-        suggestions=summary["suggestions"],
+        format_filename=DEFAULT_IOT_FORMAT_RUBRIC,
     )
-    criterion.evaluation = "local_program"
-    return criterion

@@ -19,6 +19,9 @@ dependencies = [
 thesisev = "thesisev.cli:main"
 thesisev-api = "thesisev.api:run_api"
 
+[dependency-groups]
+dev = ["pytest>=8.3", "pytest-cov>=6.0"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

@@ -8,6 +8,13 @@ from collections import Counter
 from typing import Any
 
 from thesisev.models import Issue, ThesisDocument
+from thesisev.resources import load_json_resource
+from thesisev.rubric_utils import (
+    FORMAT_RUBRIC_KEY,
+    RubricItem,
+    ScoreCriterion,
+    build_criterion,
+)
 from thesisev.scoring_content import count_terms
 
 
@@ -52,6 +59,55 @@ def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             )
     return rules
+
+
+def score_format_compliance(
+    *,
+    document: ThesisDocument,
+    format_issues: list[Issue],
+    format_requirements: dict[str, Any] | None,
+    rubric_item: RubricItem,
+    format_filename: str,
+) -> ScoreCriterion:
+    """Score one local format rubric item from a bundled structured spec.
+
+    Shared by every preset (thesis_tech / report_iot / uploads). The concrete
+    spec file is resolved per rubric, so one engine serves all presets.
+    """
+
+    format_spec = normalize_format_spec_payload(load_json_resource(format_filename))
+    rules = extract_format_rules(format_spec)
+    if not rules:
+        msg = f"format rubric rules are empty: {format_filename}"
+        raise ValueError(msg)
+    summary = score_format_rules(
+        document=document,
+        format_issues=format_issues,
+        rules=rules,
+        format_requirements=format_requirements,
+    )
+    format_count = (
+        len(format_requirements.get("items", [])) if format_requirements else 0
+    )
+    score = max(
+        0.0,
+        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["deduction"]),
+    )
+    criterion = build_criterion(
+        key=rubric_item.key or FORMAT_RUBRIC_KEY,
+        rubric_item=rubric_item,
+        score=score,
+        evidence=[
+            f"格式规范来源 {format_filename}",
+            f"格式要求条目 {format_count}",
+            f"格式问题 {len(format_issues)} 项",
+        ]
+        + summary["evidence"],
+        deductions=summary["deductions"],
+        suggestions=summary["suggestions"],
+    )
+    criterion.evaluation = "local_program"
+    return criterion
 
 
 def summarize_format_spec(
@@ -144,8 +200,12 @@ def score_format_rules(
             rule_evidence = f"{rule['label']}: 需人工核对"
             matched = False
         elif signal_type == "docx_expected":
-            passed, rule_evidence = evaluate_docx_expected_rule(document, rule)
-            matched = not passed
+            verdict, rule_evidence = evaluate_docx_expected_rule(document, rule)
+            if verdict is None:
+                rule_evidence = f"{rule_evidence}；无法自动判定，需人工核对"
+                matched = False
+            else:
+                matched = not verdict
         else:
             rule_evidence = f"{rule['label']}: 未定义检查类型，需人工核对"
             matched = False
@@ -235,38 +295,231 @@ def format_expected_items(value: Any) -> list[str]:
     return [text] if text else []
 
 
+_PARAGRAPH_PATH_PREFIXES = ("paragraph.", "run.", "paragraph_format.")
+DOCX_PARAGRAPH_COMPLIANCE_RATIO = 0.95
+
+
 def evaluate_docx_expected_rule(
     document: ThesisDocument, rule: dict[str, Any]
-) -> tuple[bool, str]:
-    """Evaluate a docx-style expected rule against the stored snapshot."""
+) -> tuple[bool | None, str]:
+    """Evaluate a docx-style expected rule against the stored snapshot.
+
+    Paragraph-level expectations (``paragraph.*`` / ``run.*`` /
+    ``paragraph_format.*``) are judged as a compliance ratio across every
+    applicable paragraph instead of a single best-matching sample. Other
+    expectations (``table.*`` / ``section.*`` / ``document.*``) describe
+    page/table-global properties and keep first-hit semantics.
+
+    Returns ``(verdict, evidence)`` where ``verdict`` is ``True`` on pass,
+    ``False`` on failure, and ``None`` when the rule cannot be judged from the
+    stored snapshot (for example no applicable paragraphs were found).
+    """
 
     snapshot = document.format_snapshot or {}
+    check = normalize_rule_check(rule)
     expected_items = get_rule_expected(rule) or []
     if not isinstance(expected_items, list):
         return False, f"{rule['label']}: 期望项格式无效"
 
-    target_snapshot = select_docx_target_snapshot(snapshot, expected_items)
+    expected = [item for item in expected_items if isinstance(item, dict)]
+    if any(_is_paragraph_expected_path(item) for item in expected):
+        return evaluate_docx_paragraph_rule(snapshot, rule, expected, check)
+    return evaluate_docx_single_target_rule(snapshot, rule, expected)
+
+
+def _is_paragraph_expected_path(item: dict[str, Any]) -> bool:
+    """Whether an expected path targets paragraph-level formatting."""
+
+    path = str(item.get("path", "")).strip()
+    return path.startswith(_PARAGRAPH_PATH_PREFIXES)
+
+
+def evaluate_docx_single_target_rule(
+    snapshot: dict[str, Any], rule: dict[str, Any], expected: list[dict[str, Any]]
+) -> tuple[bool | None, str]:
+    """Evaluate table/section/document-global expectations (first-hit rule)."""
+
+    label = str(rule.get("label") or rule.get("id") or "").strip()
+    paths = {str(item.get("path", "")).strip() for item in expected}
+    tables = (
+        snapshot.get("tables", []) if isinstance(snapshot.get("tables"), list) else []
+    )
+    sections = (
+        snapshot.get("sections", [])
+        if isinstance(snapshot.get("sections"), list)
+        else []
+    )
+    if any(path.startswith("table.") for path in paths) and not tables:
+        return None, f"{label}: 文档中未找到表格，需人工核对"
+    if any(path.startswith("section.") for path in paths) and not sections:
+        return None, f"{label}: 文档中未找到页面节，需人工核对"
+
     results: list[str] = []
     all_matched = True
-    for item in expected_items:
-        if not isinstance(item, dict):
+    for item in expected:
+        path = str(item.get("path", "")).strip()
+        if not path:
             all_matched = False
             continue
-        path = str(item.get("path", "")).strip()
-        expected = item.get("value")
-        actual = lookup_docx_snapshot_value(target_snapshot, path)
-        matched = compare_docx_expected_value(path, actual, expected)
+        expected_value = item.get("value")
+        actual = lookup_docx_snapshot_value(snapshot, path)
+        matched = compare_docx_expected_value(path, actual, expected_value)
         results.append(
-            f"{path}: 期望 {format_docx_expected_scalar(expected)}，实际 {format_docx_expected_scalar(actual)}"
+            f"{path}: 期望 {format_docx_expected_scalar(expected_value)}，"
+            f"实际 {format_docx_expected_scalar(actual)}"
         )
         if not matched:
             all_matched = False
-    evidence = f"{rule['label']}: {'；'.join(results)}"
-    if not all_matched:
-        excerpt = build_docx_location_excerpt(target_snapshot)
-        if excerpt:
-            evidence = f"{evidence}；所在片段: {excerpt}"
-    return all_matched, evidence
+    return all_matched, f"{label}: {'；'.join(results)}"
+
+
+def evaluate_docx_paragraph_rule(
+    snapshot: dict[str, Any],
+    rule: dict[str, Any],
+    expected: list[dict[str, Any]],
+    check: dict[str, Any],
+) -> tuple[bool | None, str]:
+    """Evaluate paragraph expectations across all applicable paragraphs."""
+
+    label = str(rule.get("label") or rule.get("id") or "").strip()
+    paragraphs = (
+        snapshot.get("paragraphs", [])
+        if isinstance(snapshot.get("paragraphs"), list)
+        else []
+    )
+    scope = check.get("scope", {})
+    scope_styles = normalize_string_list(
+        scope.get("styles", []) if isinstance(scope, dict) else []
+    )
+    style_expected = next(
+        (
+            str(item.get("value", "")).strip()
+            for item in expected
+            if str(item.get("path", "")).strip() == "paragraph.style"
+            and item.get("value")
+        ),
+        None,
+    )
+    has_run_expectations = any(
+        str(item.get("path", "")).strip().startswith("run.") for item in expected
+    )
+
+    candidates = collect_docx_rule_paragraphs(
+        paragraphs,
+        scope_styles=scope_styles,
+        style_expected=style_expected,
+        has_run_expectations=has_run_expectations,
+    )
+    if not candidates:
+        return None, f"{label}: 未找到可判定的目标段落"
+
+    total = len(candidates)
+    compliant = 0
+    failures: list[str] = []
+    for paragraph in candidates:
+        paragraph_failures: list[str] = []
+        for item in expected:
+            path = str(item.get("path", "")).strip()
+            if not path or path == "paragraph.style":
+                continue
+            expected_value = item.get("value")
+            actual = lookup_docx_paragraph_value(paragraph, path)
+            if not compare_docx_expected_value(path, actual, expected_value):
+                paragraph_failures.append(
+                    f"{path}: 期望 {format_docx_expected_scalar(expected_value)}，"
+                    f"实际 {format_docx_expected_scalar(actual)}"
+                )
+        if not paragraph_failures:
+            compliant += 1
+            continue
+        if len(failures) < 3:
+            excerpt = re.sub(r"\s+", " ", str(paragraph.get("text", ""))).strip()
+            prefix = f"“{excerpt[:60]}...”" if excerpt else "（空段落）"
+            failures.append(f"{prefix}: {'；'.join(paragraph_failures)}")
+
+    ratio = compliant / max(total, 1)
+    passed = ratio >= DOCX_PARAGRAPH_COMPLIANCE_RATIO
+    if passed:
+        summary = (
+            f"共 {total} 段适用段落全部合规"
+            if compliant == total
+            else f"合规 {compliant}/{total} 段（{ratio * 100:.1f}%）"
+        )
+        return True, f"{label}: {summary}"
+    return (
+        False,
+        f"{label}: 合规 {compliant}/{total} 段（{ratio * 100:.1f}%），"
+        f"期望至少 {DOCX_PARAGRAPH_COMPLIANCE_RATIO * 100:g}% 合规；"
+        f"反例：{'；'.join(failures)}",
+    )
+
+
+def collect_docx_rule_paragraphs(
+    paragraphs: list[dict[str, Any]],
+    *,
+    scope_styles: list[str],
+    style_expected: str | None,
+    has_run_expectations: bool,
+) -> list[dict[str, Any]]:
+    """Collect the paragraphs a docx rule applies to.
+
+    When the rule names styles (via ``scope.styles`` or ``paragraph.style``),
+    only paragraphs of those styles are considered; an unset style is treated
+    as the implicit Normal body default when Normal is requested. Without
+    style hints, body paragraphs after the first level-one heading are used,
+    excluding explicit heading styles. Empty paragraphs and (for run rules)
+    run-less paragraphs are skipped because they carry no format signal.
+    """
+
+    candidates = select_report_body_paragraphs(
+        [paragraph for paragraph in paragraphs if isinstance(paragraph, dict)]
+    )
+    wanted = [*scope_styles]
+    if style_expected and style_expected not in wanted:
+        wanted.append(style_expected)
+    if wanted:
+        wanted_tokens = {normalize_docx_expected_token(style) for style in wanted}
+
+        def included(paragraph: dict[str, Any]) -> bool:
+            style = paragraph.get("style")
+            if style is None:
+                return "normal" in wanted_tokens
+            return normalize_docx_expected_token(style) in wanted_tokens
+
+        candidates = [paragraph for paragraph in candidates if included(paragraph)]
+    else:
+        candidates = [
+            paragraph
+            for paragraph in candidates
+            if not str(paragraph.get("style") or "")
+            .strip()
+            .lower()
+            .startswith("heading")
+        ]
+
+    candidates = [
+        paragraph
+        for paragraph in candidates
+        if str(paragraph.get("text") or "").strip()
+    ]
+    if has_run_expectations:
+        candidates = [
+            paragraph
+            for paragraph in candidates
+            if paragraph.get("run") or paragraph.get("runs")
+        ]
+    return candidates
+
+
+def lookup_docx_paragraph_value(paragraph: dict[str, Any], path: str) -> Any:
+    """Resolve a dotted paragraph/run path against one paragraph snapshot."""
+
+    if not path:
+        return None
+    root, _, remainder = path.partition(".")
+    if root == "run":
+        return resolve_paragraph_run_value(paragraph, remainder)
+    return resolve_paragraph_format_value(paragraph, remainder)
 
 
 def build_rule_suggestion(rule: dict[str, Any]) -> str:
@@ -277,93 +530,6 @@ def build_rule_suggestion(rule: dict[str, Any]) -> str:
     if expected:
         return f"请核对{label}：{expected}"
     return f"请核对{label}"
-
-
-def select_docx_target_snapshot(
-    snapshot: dict[str, Any], expected_items: list[dict[str, Any]]
-) -> dict[str, Any]:
-    """Pick the most relevant snapshot bucket for a rule."""
-
-    paragraphs = snapshot.get("paragraphs", [])
-    tables = snapshot.get("tables", [])
-    sections = snapshot.get("sections", [])
-
-    paragraph_expectations = {
-        str(item.get("path", "")).strip(): item.get("value")
-        for item in expected_items
-        if isinstance(item, dict)
-    }
-
-    if any(path.startswith("table.") for path in paragraph_expectations):
-        return {
-            "paragraphs": [],
-            "tables": [tables[0]] if isinstance(tables, list) and tables else [],
-            "sections": sections if isinstance(sections, list) else [],
-            "word_count": snapshot.get("word_count"),
-            "section_count": snapshot.get("section_count"),
-        }
-
-    if any(path.startswith("section.") for path in paragraph_expectations):
-        return {
-            "paragraphs": [],
-            "tables": tables if isinstance(tables, list) else [],
-            "sections": [sections[0]]
-            if isinstance(sections, list) and sections
-            else [],
-            "word_count": snapshot.get("word_count"),
-            "section_count": snapshot.get("section_count"),
-        }
-
-    target_paragraph = select_matching_paragraph(paragraphs, paragraph_expectations)
-    return {
-        "paragraphs": [target_paragraph] if target_paragraph else [],
-        "tables": tables if isinstance(tables, list) else [],
-        "sections": sections if isinstance(sections, list) else [],
-        "word_count": snapshot.get("word_count"),
-        "section_count": snapshot.get("section_count"),
-    }
-
-
-def select_matching_paragraph(
-    paragraphs: Any, expectations: dict[str, Any]
-) -> dict[str, Any] | None:
-    """Select the paragraph that best matches a rule."""
-
-    if not isinstance(paragraphs, list) or not paragraphs:
-        return None
-
-    candidates = [paragraph for paragraph in paragraphs if isinstance(paragraph, dict)]
-    candidates = select_report_body_paragraphs(candidates)
-    style_expected = expectations.get("paragraph.style")
-    if style_expected is not None:
-        normalized_expected = normalize_docx_expected_token(style_expected)
-        style_candidates = [
-            paragraph
-            for paragraph in candidates
-            if (
-                normalize_docx_expected_token(paragraph.get("style"))
-                == normalized_expected
-            )
-        ]
-        if style_candidates:
-            candidates = style_candidates
-
-    if any(path.startswith("run.") for path in expectations):
-        run_candidates = [
-            paragraph
-            for paragraph in candidates
-            if paragraph.get("run") or paragraph.get("runs")
-        ]
-        if run_candidates:
-            candidates = run_candidates
-
-    return max(
-        candidates,
-        key=lambda paragraph: count_matching_paragraph_expectations(
-            paragraph, expectations
-        ),
-        default=None,
-    )
 
 
 def select_report_body_paragraphs(
@@ -379,76 +545,9 @@ def select_report_body_paragraphs(
     return paragraphs
 
 
-def count_matching_paragraph_expectations(
-    paragraph: dict[str, Any], expectations: dict[str, Any]
-) -> int:
-    """Count expected values matched by one paragraph snapshot."""
+def resolve_paragraph_format_value(paragraph: dict[str, Any], remainder: str) -> Any:
+    """Resolve a paragraph-format property from one paragraph snapshot."""
 
-    snapshot = {"paragraphs": [paragraph]}
-    return sum(
-        compare_docx_expected_value(
-            path, lookup_docx_snapshot_value(snapshot, path), expected
-        )
-        for path, expected in expectations.items()
-    )
-
-
-def build_docx_location_excerpt(snapshot: dict[str, Any]) -> str:
-    """Build a compact human-readable location for a failed DOCX rule."""
-
-    paragraphs = snapshot.get("paragraphs", [])
-    if isinstance(paragraphs, list) and paragraphs:
-        paragraph = paragraphs[0]
-        if isinstance(paragraph, dict):
-            text = re.sub(r"\s+", " ", str(paragraph.get("text", ""))).strip()
-            if text:
-                return f"{text[:120]}{'...' if len(text) > 120 else ''}"
-
-    tables = snapshot.get("tables", [])
-    if isinstance(tables, list) and tables:
-        return "第 1 个表格"
-
-    sections = snapshot.get("sections", [])
-    if isinstance(sections, list) and sections:
-        return "文档页面设置"
-
-    return ""
-
-
-def lookup_docx_snapshot_value(snapshot: dict[str, Any], path: str) -> Any:
-    """Resolve a dotted path against the stored docx snapshot."""
-
-    if not path:
-        return None
-    root, _, remainder = path.partition(".")
-    if root == "document":
-        if remainder == "word_count":
-            return snapshot.get("word_count")
-        if remainder == "section_count":
-            return snapshot.get("section_count")
-        return snapshot.get(remainder)
-    if root == "paragraph":
-        return resolve_from_first_paragraph(snapshot, remainder)
-    if root == "paragraph_format":
-        return resolve_from_first_paragraph(snapshot, remainder)
-    if root == "run":
-        return resolve_from_first_run(snapshot, remainder)
-    if root == "table":
-        return resolve_from_first_table(snapshot, remainder)
-    if root == "section":
-        return resolve_from_first_section(snapshot, remainder)
-    return None
-
-
-def resolve_from_first_paragraph(snapshot: dict[str, Any], remainder: str) -> Any:
-    """Resolve a paragraph property from the first stored paragraph."""
-
-    paragraphs = snapshot.get("paragraphs", [])
-    if not isinstance(paragraphs, list) or not paragraphs:
-        return None
-    paragraph = paragraphs[0]
-    if not isinstance(paragraph, dict):
-        return None
     if not remainder:
         return paragraph
     if remainder == "style":
@@ -474,6 +573,33 @@ def resolve_from_first_paragraph(snapshot: dict[str, Any], remainder: str) -> An
     return paragraph.get(remainder)
 
 
+def resolve_paragraph_run_value(paragraph: dict[str, Any], remainder: str) -> Any:
+    """Resolve a run property from one paragraph's primary run."""
+
+    run = paragraph.get("run", {})
+    if not isinstance(run, dict):
+        return None
+    if remainder == "font.name":
+        return run.get("font_name")
+    if remainder == "font.size":
+        return run.get("font_size_pt")
+    if remainder == "font.bold":
+        return run.get("bold")
+    return run.get(remainder)
+
+
+def resolve_from_first_paragraph(snapshot: dict[str, Any], remainder: str) -> Any:
+    """Resolve a paragraph property from the first stored paragraph."""
+
+    paragraphs = snapshot.get("paragraphs", [])
+    if not isinstance(paragraphs, list) or not paragraphs:
+        return None
+    paragraph = paragraphs[0]
+    if not isinstance(paragraph, dict):
+        return None
+    return resolve_paragraph_format_value(paragraph, remainder)
+
+
 def default_zero_length(value: Any) -> Any:
     """Represent an unset DOCX spacing length as its effective zero value."""
 
@@ -489,16 +615,32 @@ def resolve_from_first_run(snapshot: dict[str, Any], remainder: str) -> Any:
     first_paragraph = paragraphs[0]
     if not isinstance(first_paragraph, dict):
         return None
-    run = first_paragraph.get("run", {})
-    if not isinstance(run, dict):
+    return resolve_paragraph_run_value(first_paragraph, remainder)
+
+
+def lookup_docx_snapshot_value(snapshot: dict[str, Any], path: str) -> Any:
+    """Resolve a dotted path against the stored docx snapshot."""
+
+    if not path:
         return None
-    if remainder == "font.name":
-        return run.get("font_name")
-    if remainder == "font.size":
-        return run.get("font_size_pt")
-    if remainder == "font.bold":
-        return run.get("bold")
-    return run.get(remainder)
+    root, _, remainder = path.partition(".")
+    if root == "document":
+        if remainder == "word_count":
+            return snapshot.get("word_count")
+        if remainder == "section_count":
+            return snapshot.get("section_count")
+        return snapshot.get(remainder)
+    if root == "paragraph":
+        return resolve_from_first_paragraph(snapshot, remainder)
+    if root == "paragraph_format":
+        return resolve_from_first_paragraph(snapshot, remainder)
+    if root == "run":
+        return resolve_from_first_run(snapshot, remainder)
+    if root == "table":
+        return resolve_from_first_table(snapshot, remainder)
+    if root == "section":
+        return resolve_from_first_section(snapshot, remainder)
+    return None
 
 
 def resolve_from_first_table(snapshot: dict[str, Any], remainder: str) -> Any:

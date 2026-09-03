@@ -38,19 +38,27 @@ void loadHistory();
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   resetRenderedResults();
-  setLoading(true, "正在分析论文，请稍候...");
+  setLoading(true, "正在提交论文...");
 
   try {
-    const response = await submitEvaluation();
-    if (!response.ok) {
-      throw new Error(response.detail || "请求失败");
+    const submitResponse = await submitEvaluation();
+    if (!submitResponse.ok) {
+      throw new Error(submitResponse.detail || "请求失败");
     }
-    state.result = response.data;
+    const job = submitResponse.data;
+    const finalData = job && job.job_id
+      ? await pollJobResult(job.job_id)
+      : job; // legacy direct-result responses still render immediately
+
+    if (!finalData || !finalData.document) {
+      throw new Error("评审未返回有效结果");
+    }
+    state.result = finalData;
     state.activeIssueFilter = "all";
     state.activeIssueKey = null;
     state.activeScoreKey = null;
     state.activeSectionId =
-      response.data.document.root_sections[0]?.identifier || null;
+      finalData.document.root_sections[0]?.identifier || null;
     renderResults();
     void loadHistory();
     setLoading(false, "分析完成");
@@ -58,6 +66,34 @@ form.addEventListener("submit", async (event) => {
     setLoading(false, error.message || "处理失败");
   }
 });
+
+async function pollJobResult(jobId) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  const intervalMs = 800;
+  while (Date.now() < deadline) {
+    const payload = await fetchJson(
+      `/evaluate/jobs/${encodeURIComponent(jobId)}`,
+    );
+    if (!payload.ok) {
+      throw new Error(payload.detail || "查询任务状态失败");
+    }
+    const job = payload.data;
+    if (job.status === "done" && job.result) {
+      return job.result;
+    }
+    if (job.status === "error") {
+      throw new Error(job.error || "评审失败");
+    }
+    setLoading(
+      true,
+      job.status === "queued"
+        ? "排队中，等待空闲评审任务..."
+        : "正在分析论文，请稍候...",
+    );
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error("评审超时，请稍后在历史记录中查看结果");
+}
 
 function resetRenderedResults() {
   state.result = null;
@@ -90,7 +126,21 @@ async function postForm(url, formData) {
     method: "POST",
     body: formData,
   });
-  const payload = await response.json();
+  return parseJsonResponse(response);
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  return parseJsonResponse(response);
+}
+
+async function parseJsonResponse(response) {
+  let payload = {};
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = {};
+  }
   if (!response.ok) {
     return { ok: false, detail: payload.detail || "请求失败" };
   }
@@ -98,8 +148,7 @@ async function postForm(url, formData) {
 }
 
 async function loadHistory() {
-  const response = await fetch("/history");
-  const payload = await response.json();
+  const payload = await fetchJson("/history");
   renderHistory(payload.data?.items || []);
 }
 

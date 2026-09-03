@@ -30,12 +30,43 @@ class ScoreCriterion:
 
 @dataclass(slots=True)
 class RubricItem:
-    """Normalized rubric item loaded from JSON or upload metadata."""
+    """Normalized rubric item loaded from JSON or upload metadata.
+
+    ``key`` is the stable, code-facing identifier used for scorer dispatch
+    and cross-version merging. It is decoupled from ``name`` so that rubric
+    labels can change (for example 译文 vs 英文摘要) without breaking code.
+    """
 
     name: str
     standards: list[str]
     evaluation: str
     max_score: float
+    key: str = ""
+
+
+FORMAT_RUBRIC_KEY = "format"
+
+#: Stable keys for built-in thesis rubric items. Aliases (译文/英文摘要) map to
+#: the same key so scorer dispatch never depends on a single Chinese label.
+KNOWN_RUBRIC_KEYS: dict[str, str] = {
+    "选题及工作量": "topic_workload",
+    "调查论证": "research_argument",
+    "译文": "translation",
+    "英文摘要": "translation",
+    "实验方案、分析与技能": "experiment_analysis",
+    "论文质量": "writing_quality",
+    "创新": "innovation",
+}
+
+
+def infer_rubric_key(name: str) -> str:
+    """Return a stable rubric key for a built-in item name.
+
+    Unknown names fall back to the name itself so that custom or IoT rubrics
+    (whose local scorers match by name) keep working unchanged.
+    """
+
+    return KNOWN_RUBRIC_KEYS.get(name, name)
 
 
 def normalize_criterion_name(criterion: Any) -> str:
@@ -149,6 +180,8 @@ def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
         item["standard"] = parse_rubric_standard(
             value.get("standard", value.get("standards", value.get("标准", [])))
         )
+        if value.get("key"):
+            item["key"] = str(value["key"]).strip()
         if value.get("evaluation"):
             item["evaluation"] = str(value["evaluation"]).strip().lower()
         return item
@@ -185,15 +218,20 @@ def normalize_rubric_items(
 ) -> list[RubricItem]:
     """Normalize rubric item dictionaries preserving configured order."""
 
-    normalized = [
-        RubricItem(
-            name=normalize_criterion_name(item.get("criterion", "")),
-            standards=parse_standards(item.get("standard", item.get("standards", []))),
-            evaluation=str(item.get("evaluation") or "llm").strip().lower(),
-            max_score=parse_score_value(item.get("score", 0)),
+    normalized = []
+    for item in items:
+        name = normalize_criterion_name(item.get("criterion", ""))
+        normalized.append(
+            RubricItem(
+                name=name,
+                standards=parse_standards(
+                    item.get("standard", item.get("standards", []))
+                ),
+                evaluation=str(item.get("evaluation") or "llm").strip().lower(),
+                max_score=parse_score_value(item.get("score", 0)),
+                key=str(item.get("key") or infer_rubric_key(name)).strip() or name,
+            )
         )
-        for item in items
-    ]
     if require_all and not normalized:
         msg = "score rubric must contain at least one criterion"
         raise ValueError(msg)
@@ -203,13 +241,22 @@ def normalize_rubric_items(
 def merge_rubric_items(
     default_items: list[RubricItem], uploaded_items: list[RubricItem]
 ) -> list[RubricItem]:
-    """Overlay uploaded rubric scores onto default criteria."""
+    """Overlay uploaded rubric scores onto default criteria.
 
-    item_by_name = {item.name: item for item in default_items}
+    Uploaded items replace defaults by stable key first, then by name.
+    Uploaded items that match neither are ignored, preserving the original
+    ordering and preventing unknown criteria from leaking into the rubric.
+    """
+
+    overlay: dict[str, RubricItem] = {}
     for item in uploaded_items:
-        if item.name in item_by_name:
-            item_by_name[item.name] = item
-    return [item_by_name[item.name] for item in default_items]
+        overlay[item.key or item.name] = item
+        overlay[item.name] = item
+
+    merged: list[RubricItem] = []
+    for item in default_items:
+        merged.append(overlay.get(item.key or item.name, item))
+    return merged
 
 
 def parse_format_requirement_label(label: Any) -> str:

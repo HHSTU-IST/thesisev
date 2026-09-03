@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import re
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import tiktoken
 
+from thesisev.logic_review import detect_logic_issues
 from thesisev.models import (
     Issue,
     Paragraph,
@@ -67,12 +68,13 @@ class LocalIssueGroups:
 
     format_issues: list[Issue]
     writing_issues: list[Issue]
+    logic_issues: list[Issue] = field(default_factory=list)
 
     @property
     def all_issues(self) -> list[Issue]:
         """Return the combined list for compatibility with the existing UI."""
 
-        return [*self.format_issues, *self.writing_issues]
+        return [*self.format_issues, *self.writing_issues, *self.logic_issues]
 
 
 def build_statistics(
@@ -209,6 +211,7 @@ def detect_issue_groups(document: ThesisDocument) -> LocalIssueGroups:
     return LocalIssueGroups(
         format_issues=detect_punctuation_issues(document),
         writing_issues=detect_colloquial_issues(document),
+        logic_issues=detect_logic_issues(document),
     )
 
 
@@ -399,6 +402,11 @@ def annotate_report_topic_relevance(
     total_score = 0.0
     for rubric_item in rubric_items:
         criterion = str(rubric_item.get("criterion", "")).strip()
+        if criterion == "格式规范":
+            # Format is scored by the local format engine; its standards are
+            # typographic rules, not topic signals, and must not dilute the
+            # report topic-relevance coverage or keyword lists.
+            continue
         standards = parse_report_standards(
             rubric_item.get("standard", rubric_item.get("standards", []))
         )
@@ -1288,6 +1296,10 @@ def should_match_colloquial(
         return False
     if phrase == "然后" and any(
         token in sentence_text for token in ("然后进行", "然后对", "然后将")
+    ):
+        return False
+    if phrase == "其实" and any(
+        token in sentence_text for token in ("其实质", "其实际")
     ):
         return False
     return phrase in sentence_text

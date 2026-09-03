@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 import tomllib
 from dataclasses import dataclass
 from typing import Any
@@ -93,6 +94,23 @@ def default_model_for_provider(provider: str) -> str:
     }.get(provider, provider)
 
 
+def extract_response_text(response: Any) -> str:
+    """Extract text content from a LangChain response object."""
+
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts)
+    return str(content)
+
+
 def create_chat_model(config: ModelConfig):
     """Create a LangChain chat model instance from the runtime config."""
 
@@ -124,6 +142,30 @@ def create_deepseek_chat_model(config: ModelConfig) -> ChatOpenAI:
     if config.api_key and os.getenv(config.api_key):
         kwargs["api_key"] = os.getenv(config.api_key)
     return ChatOpenAI(**kwargs)
+
+
+def invoke_chat_model_with_retry(
+    model, messages, *, attempts: int = 3, base_delay: float = 1.0
+) -> Any:
+    """Invoke a chat model with exponential-backoff retries.
+
+    Transient provider/network errors are retried with ``base_delay *
+    2 ** attempt`` sleeps between attempts. When every attempt fails the last
+    exception is re-raised so callers can degrade to deterministic scoring.
+    """
+
+    last_error: Exception | None = None
+    for attempt in range(max(1, attempts)):
+        try:
+            return model.invoke(messages)
+        except Exception as exc:  # provider errors are heterogeneous
+            last_error = exc
+            if attempt + 1 < max(1, attempts):
+                time.sleep(base_delay * (2**attempt))
+    if last_error is not None:
+        raise last_error
+    msg = "invoke_chat_model_with_retry called without a model"
+    raise RuntimeError(msg)
 
 
 def resolve_deepseek_base_url(config: ModelConfig) -> str:

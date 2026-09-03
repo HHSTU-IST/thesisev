@@ -8,7 +8,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from thesisev.llm import ModelConfig, create_chat_model
+from thesisev.llm import (
+    ModelConfig,
+    create_chat_model,
+    extract_response_text,
+    invoke_chat_model_with_retry,
+)
 from thesisev.resources import load_json_resource
 
 ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
@@ -77,7 +82,8 @@ def generate_comment_with_llm(
     )
     try:
         model = create_chat_model(model_config)
-        response = model.invoke(
+        response = invoke_chat_model_with_retry(
+            model,
             [
                 SystemMessage(
                     content=(
@@ -91,7 +97,7 @@ def generate_comment_with_llm(
                     )
                 ),
                 HumanMessage(content=prompt),
-            ]
+            ],
         )
     except Exception:
         return fallback, "fallback"
@@ -153,23 +159,6 @@ def build_comment_prompt(
     )
 
 
-def extract_response_text(response: Any) -> str:
-    """Extract text content from a LangChain response object."""
-
-    content = getattr(response, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts)
-    return str(content)
-
-
 def select_comment_keywords(title: str, fallback_keywords: list[str]) -> list[str]:
     """Pick a small set of title-related keywords for the comment."""
 
@@ -216,22 +205,6 @@ def extract_title_keywords(title: str) -> list[str]:
             continue
         keywords.append(stripped)
     return keywords
-
-
-def summarize_structure(root_sections) -> str:
-    """Summarize structural completeness from section distribution."""
-
-    if not root_sections:
-        return "结构信息暂不充分"
-    top_ratio = max(section.ratio for section in root_sections)
-    section_count = len(root_sections)
-    if section_count >= 3 and top_ratio <= 0.45:
-        return "章节安排较为均衡"
-    if top_ratio >= 0.6:
-        return "章节分配略有失衡"
-    if section_count >= 2:
-        return "章节结构基本完整"
-    return "结构层次仍可进一步完善"
 
 
 def summarize_technology(technology_details) -> str:

@@ -3,20 +3,26 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from thesisev.llm import ModelConfig, create_chat_model
+from thesisev.llm import (
+    ModelConfig,
+    create_chat_model,
+    extract_response_text,
+    invoke_chat_model_with_retry,
+)
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import (
+    FORMAT_RUBRIC_KEY,
     RubricItem,
     ScoreCriterion,
     build_criterion,
     merge_rubric_items,
-    normalize_criterion_name,
     normalize_rubric_items,
     normalize_rubric_payload,
     parse_score_value,
@@ -35,17 +41,28 @@ from thesisev.scoring_format import (
     get_rule_expected,
     normalize_format_spec_payload,
     parse_float_value,
+    score_format_compliance,
 )
+from thesisev.scoring_iot import OWNED_IOT_ITEM_NAMES, score_iot_item_locally
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
-FORMAT_RUBRIC_BY_SCORE_RUBRIC = {"score_report_iot.json": "score_report_iot_f.json"}
-REQUIRED_CRITERIA = (
-    "选题及工作量",
-    "调查论证",
-    "译文",
-    "实验方案、分析与技能",
-    "论文质量",
-    "创新",
+FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
+    "score_report_iot.json": "score_report_iot_f.json",
+    "score_thesis_tech.json": "score_thesis_tech_f.json",
+}
+
+#: Stable keys implemented by the local content scorers in scoring_content.py.
+THESIS_LOCAL_SCORER_KEYS = frozenset(
+    {
+        "topic_workload",
+        "research_argument",
+        "translation",
+        "experiment_analysis",
+        "writing_quality",
+        "innovation",
+    }
 )
 
 
@@ -122,72 +139,6 @@ def calculate_score_report(
     )
 
 
-def calculate_score_report_with_llm(
-    *,
-    content_context: dict[str, Any],
-    rubric_items: list[RubricItem],
-    rubric_source: str,
-    rubric_filename: str,
-    model_config: ModelConfig,
-) -> ScoreReport:
-    """Calculate rubric scores by asking an LLM for each criterion."""
-
-    prompt = build_score_prompt(
-        content_context=content_context,
-        rubric_items=rubric_items,
-        rubric_filename=rubric_filename,
-    )
-    model = create_chat_model(model_config)
-    response = model.invoke(
-        [
-            SystemMessage(
-                content=(
-                    "你是一名严谨的中文论文评分老师。"
-                    "你只负责六项评分标准打分，不负责格式检测。"
-                    "请仅根据提供的内容证据和评分标准，给出六项标准的分数。"
-                    "必须只输出纯 JSON，不要 Markdown，不要解释。"
-                )
-            ),
-            HumanMessage(content=prompt),
-        ]
-    )
-    payload = parse_llm_json_response(response)
-    criteria = normalize_llm_score_criteria(payload, rubric_items)
-    return build_score_report(
-        criteria=criteria, rubric_source=rubric_source, score_source="llm"
-    )
-
-
-def calculate_score_report_local(
-    *,
-    document: ThesisDocument,
-    topic_analysis: dict[str, Any],
-    writing_issues: list[Issue],
-    keywords: list[str],
-    technology_details: list[TechnologyStackItem],
-    rubric_items: list[RubricItem],
-    rubric_source: str,
-) -> ScoreReport:
-    """Fallback deterministic score calculation."""
-
-    item_by_name = {item.name: item for item in rubric_items}
-    criteria = [
-        score_topic_workload(
-            document, topic_analysis, technology_details, item_by_name["选题及工作量"]
-        ),
-        score_research_argument(document, keywords, item_by_name["调查论证"]),
-        score_translation(document, item_by_name["译文"]),
-        score_experiment_analysis(
-            document, technology_details, item_by_name["实验方案、分析与技能"]
-        ),
-        score_writing_quality(document, writing_issues, item_by_name["论文质量"]),
-        score_innovation(document, technology_details, item_by_name["创新"]),
-    ]
-    return build_score_report(
-        criteria=criteria, rubric_source=rubric_source, score_source="local"
-    )
-
-
 def score_rubric_items(
     *,
     document: ThesisDocument,
@@ -205,37 +156,86 @@ def score_rubric_items(
 ) -> list[ScoreCriterion]:
     """Score each rubric item according to its configured evaluation method."""
 
-    item_by_name = {item.name: item for item in rubric_items}
+    validate_rubric_local_scorability(rubric_items, rubric_filename=rubric_filename)
+    local_kwargs: dict[str, Any] = {
+        "document": document,
+        "topic_analysis": topic_analysis,
+        "format_issues": format_issues,
+        "writing_issues": writing_issues,
+        "keywords": keywords,
+        "technology_details": technology_details,
+        "format_requirements": format_requirements,
+    }
     criteria: list[ScoreCriterion] = []
     for item in rubric_items:
         method = item.evaluation.strip().lower()
         if method == "llm" and model_config is not None and model_config.is_available():
-            criteria.append(
-                score_item_with_llm(
-                    content_context=content_context,
-                    rubric_item=item,
-                    rubric_filename=rubric_filename,
-                    model_config=model_config,
+            try:
+                criteria.append(
+                    score_item_with_llm(
+                        content_context=content_context,
+                        rubric_item=item,
+                        rubric_filename=rubric_filename,
+                        model_config=model_config,
+                    )
                 )
-            )
+            except Exception as exc:  # degrade one item, never fail the review
+                logger.warning(
+                    "llm scoring failed for %s (rubric=%s); falling back to local: %s",
+                    item.name,
+                    rubric_filename,
+                    exc,
+                )
+                criteria.append(
+                    mark_llm_fallback_if_needed(
+                        score_item_locally(
+                            rubric_item=item,
+                            rubric_filename=rubric_filename,
+                            **local_kwargs,
+                        ),
+                        requested_method="llm",
+                    )
+                )
             continue
         criteria.append(
             mark_llm_fallback_if_needed(
                 score_item_locally(
-                    document=document,
-                    topic_analysis=topic_analysis,
-                    format_issues=format_issues,
-                    writing_issues=writing_issues,
-                    keywords=keywords,
-                    technology_details=technology_details,
-                    format_requirements=format_requirements,
-                    rubric_item=item,
-                    item_by_name=item_by_name,
+                    rubric_item=item, rubric_filename=rubric_filename, **local_kwargs
                 ),
                 requested_method=method,
             )
         )
     return criteria
+
+
+def validate_rubric_local_scorability(
+    rubric_items: list[RubricItem], *, rubric_filename: str
+) -> None:
+    """Raise early when a rubric item has no local scorer behind it.
+
+    LLM-configured items may be answered by any model, so they are exempt
+    unless the item belongs to a built-in thesis rubric whose local fallback
+    must stay complete. Local items (or thesis items, which can silently fall
+    back to local when no API key is configured) must resolve to an
+    implemented scorer, otherwise an unknown criterion would previously have
+    been reported as a silent zero score.
+    """
+
+    thesis_tech = rubric_filename.startswith("score_thesis_tech")
+    supported = (
+        THESIS_LOCAL_SCORER_KEYS | {FORMAT_RUBRIC_KEY} | set(OWNED_IOT_ITEM_NAMES)
+    )
+    for item in rubric_items:
+        if item.evaluation == "llm" and not thesis_tech:
+            continue
+        if (item.key or item.name) in supported or item.name in supported:
+            continue
+        msg = (
+            "rubric item has no local scorer: "
+            f"name={item.name!r} key={item.key!r} "
+            f"(rubric={rubric_filename})"
+        )
+        raise ValueError(msg)
 
 
 def mark_llm_fallback_if_needed(
@@ -263,7 +263,8 @@ def score_item_with_llm(
         rubric_filename=rubric_filename,
     )
     model = create_chat_model(model_config)
-    response = model.invoke(
+    response = invoke_chat_model_with_retry(
+        model,
         [
             SystemMessage(
                 content=(
@@ -274,7 +275,7 @@ def score_item_with_llm(
                 )
             ),
             HumanMessage(content=prompt),
-        ]
+        ],
     )
     payload = parse_llm_json_response(response)
     criteria = normalize_llm_score_criteria(payload, [rubric_item])
@@ -291,38 +292,60 @@ def score_item_locally(
     technology_details: list[TechnologyStackItem],
     format_requirements: dict[str, Any] | None,
     rubric_item: RubricItem,
-    item_by_name: dict[str, RubricItem],
+    rubric_filename: str,
 ) -> ScoreCriterion:
-    """Score a single rubric item using local heuristics."""
+    """Score a single rubric item using local heuristics.
 
-    if rubric_item.name == "选题及工作量":
+    Dispatch is driven by the stable rubric key (see ``RubricItem.key``) so it
+    never depends on a Chinese label that may drift between rubric versions.
+    """
+
+    key = rubric_item.key or rubric_item.name
+    if key == "topic_workload":
         return score_topic_workload(
             document, topic_analysis, technology_details, rubric_item
         )
-    if rubric_item.name == "调查论证":
+    if key == "research_argument":
         return score_research_argument(document, keywords, rubric_item)
-    if rubric_item.name == "译文":
+    if key == "translation":
         return score_translation(document, rubric_item)
-    if rubric_item.name == "实验方案、分析与技能":
+    if key == "experiment_analysis":
         return score_experiment_analysis(document, technology_details, rubric_item)
-    if rubric_item.name == "论文质量":
+    if key == "writing_quality":
         return score_writing_quality(document, writing_issues, rubric_item)
-    if rubric_item.name == "创新":
+    if key == "innovation":
         return score_innovation(document, technology_details, rubric_item)
-    from thesisev.scoring_iot import score_iot_item_locally
-
-    iot_criterion = score_iot_item_locally(
-        document=document,
-        format_issues=format_issues,
-        writing_issues=writing_issues,
-        technology_details=technology_details,
-        format_requirements=format_requirements,
-        rubric_item=rubric_item,
-    )
-    if iot_criterion is not None:
-        return iot_criterion
+    if key == FORMAT_RUBRIC_KEY or rubric_item.name == "格式规范":
+        format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
+        if format_filename is None:
+            return build_criterion(
+                key=FORMAT_RUBRIC_KEY,
+                rubric_item=rubric_item,
+                score=0,
+                evidence=["该评分预设未配置内置格式规范文件"],
+                deductions=["缺少格式规范文件映射"],
+                suggestions=["为该预设补充格式规范文件"],
+            )
+        return score_format_compliance(
+            document=document,
+            format_issues=format_issues,
+            format_requirements=format_requirements,
+            rubric_item=rubric_item,
+            format_filename=format_filename,
+        )
+    if key in OWNED_IOT_ITEM_NAMES or rubric_item.name in OWNED_IOT_ITEM_NAMES:
+        iot_criterion = score_iot_item_locally(
+            document=document,
+            format_issues=format_issues,
+            writing_issues=writing_issues,
+            technology_details=technology_details,
+            format_requirements=format_requirements,
+            rubric_item=rubric_item,
+        )
+        if iot_criterion is not None:
+            return iot_criterion
     return build_criterion(
-        key=normalize_criterion_name(rubric_item.name),
+        key=key,
         rubric_item=rubric_item,
         score=0,
         evidence=["未实现本地评分逻辑"],
@@ -431,7 +454,7 @@ def build_score_prompt(
         "rubric": rubric_summary,
     }
     return (
-        "请根据以下论文信息，为六项评分标准分别打分，并输出严格 JSON。\n"
+        "请根据以下论文信息，为评分标准中列出的每一项打分，并输出严格 JSON。\n"
         "JSON 结构必须为：\n"
         "{"
         '"criteria":[{"key":"选题及工作量","name":"选题及工作量","score":0,"max_score":20,'
@@ -439,8 +462,8 @@ def build_score_prompt(
         '"raw_score":0,"raw_total":0,"score":0'
         "}\n"
         "要求：\n"
-        "1. 六项 criteria 必须全部返回。\n"
-        "2. score 为百分制总分，raw_score 为六项原始分总和，raw_total 为六项满分总和。\n"
+        "1. criteria 必须覆盖 rubric 中的全部项目。\n"
+        "2. score 为百分制总分，raw_score 为各项原始分总和，raw_total 为各项满分总和。\n"
         "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
         "4. 评分必须参考评分标准，但分数由你综合判断。\n"
         "5. 证据、扣分原因、建议都要简洁具体；"
@@ -467,23 +490,6 @@ def parse_llm_json_response(response: Any) -> dict[str, Any]:
         return json.loads(text[start : end + 1])
 
 
-def extract_response_text(response: Any) -> str:
-    """Extract text content from a LangChain response object."""
-
-    content = getattr(response, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts)
-    return str(content)
-
-
 def normalize_llm_score_criteria(
     payload: dict[str, Any], rubric_items: list[RubricItem]
 ) -> list[ScoreCriterion]:
@@ -503,7 +509,22 @@ def normalize_llm_score_criteria(
         if name not in rubric_by_name:
             raise ValueError(f"unknown rubric criterion: {name}")
         rubric_item = rubric_by_name[name]
-        score = round(parse_score_value(entry.get("score", 0)), 2)
+        raw_score = parse_score_value(entry.get("score", 0))
+        clamped_score = round(min(max(raw_score, 0.0), rubric_item.max_score), 2)
+        evidence = parse_string_list(entry.get("evidence", []))
+        if clamped_score != round(raw_score, 2):
+            logger.warning(
+                "llm returned out-of-range score for %s: %.2f not in [0, %s]; clamped to %.2f",
+                rubric_item.name,
+                raw_score,
+                rubric_item.max_score,
+                clamped_score,
+            )
+            evidence.append(
+                f"LLM 返回分数 {round(raw_score, 2)} 超出 [0, {rubric_item.max_score}]，"
+                f"已修正为 {clamped_score}"
+            )
+        score = clamped_score
         deductions = parse_string_list(entry.get("deductions", []))
         validate_llm_deductions(
             criterion_name=rubric_item.name,
@@ -519,13 +540,13 @@ def normalize_llm_score_criteria(
                 max_score=rubric_item.max_score,
                 standards=rubric_item.standards,
                 evaluation="llm",
-                evidence=parse_string_list(entry.get("evidence", [])),
+                evidence=evidence,
                 deductions=deductions,
                 suggestions=parse_string_list(entry.get("suggestions", [])),
             )
         )
     if len(criteria) != len(rubric_items):
-        raise ValueError("llm score payload must include six criteria")
+        raise ValueError("llm score payload criteria count does not match rubric items")
     return criteria
 
 
@@ -555,7 +576,9 @@ def resolve_rubric_items(
     """Resolve rubric items from upload metadata or bundled config."""
 
     default_items = append_builtin_format_rubric_item(
-        normalize_rubric_payload(load_json_resource(rubric_filename)),
+        normalize_rubric_items(
+            normalize_rubric_payload(load_json_resource(rubric_filename))
+        ),
         rubric_filename=rubric_filename,
     )
     if rubric and rubric.get("items"):
@@ -591,6 +614,7 @@ def build_format_rubric_item(format_filename: str) -> RubricItem:
         standards=build_format_standards(rules),
         evaluation="local",
         max_score=sum_format_rule_points(rules),
+        key=FORMAT_RUBRIC_KEY,
     )
 
 

@@ -1,21 +1,136 @@
-{
-    "一级标题": {
-        "font-family": "黑体",
-        "font-size": "三号"
-    },
-    "二级标题": {
-        "font-family": "黑体",
-        "font-size": "四号"
-    },
-    "正文": {
-        "font-family": "宋体",
-        "font-size": "小四",
-        "line-height": "1.5"
-    },
-    "段间距": {
-        "before": "0",
-        "after": "0"
-    },
-    "表格": "居中",
-    "篇幅": "3500~4000"
-}
+[
+  {
+    "id": "document_layout",
+    "name": "文档版式",
+    "weight": 1,
+    "rules": [
+      {
+        "id": "h1_font",
+        "label": "一级标题格式",
+        "points": 2,
+        "check": {
+          "type": "docx_expected",
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Heading 1"
+            },
+            {
+              "path": "run.font.name",
+              "value": "黑体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "16pt"
+            }
+          ]
+        }
+      },
+      {
+        "id": "h2_font",
+        "label": "二级标题格式",
+        "points": 2,
+        "check": {
+          "type": "docx_expected",
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Heading 2"
+            },
+            {
+              "path": "run.font.name",
+              "value": "黑体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "14pt"
+            }
+          ]
+        }
+      },
+      {
+        "id": "body_font",
+        "label": "正文格式",
+        "points": 6,
+        "check": {
+          "type": "docx_expected",
+          "scope": {
+            "styles": [
+              "Normal"
+            ]
+          },
+          "expected": [
+            {
+              "path": "paragraph.style",
+              "value": "Normal"
+            },
+            {
+              "path": "run.font.name",
+              "value": "宋体"
+            },
+            {
+              "path": "run.font.size",
+              "value": "12pt"
+            },
+            {
+              "path": "paragraph_format.line_spacing",
+              "value": 1.5
+            },
+            {
+              "path": "paragraph_format.space_before",
+              "value": "0pt"
+            },
+            {
+              "path": "paragraph_format.space_after",
+              "value": "0pt"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "tables_and_spacing",
+    "name": "表格",
+    "weight": 1,
+    "rules": [
+      {
+        "id": "table_alignment",
+        "label": "表格对齐",
+        "points": 2,
+        "check": {
+          "type": "docx_expected",
+          "expected": [
+            {
+              "path": "table.alignment",
+              "value": "center"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "id": "content_length",
+    "name": "篇幅",
+    "weight": 1,
+    "rules": [
+      {
+        "id": "word_count",
+        "label": "篇幅",
+        "points": 3,
+        "check": {
+          "type": "word_count_range",
+          "expected": [
+            {
+              "path": "document.word_count",
+              "value": "3500~4000"
+            }
+          ],
+          "min": 3500,
+          "max": 4000
+        }
+      }
+    ]
+  }
+]

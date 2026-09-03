@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from json import JSONDecodeError
 from pathlib import Path
@@ -29,6 +31,7 @@ from thesisev.analyzers import (
     split_technology_stack,
 )
 from thesisev.commentary import generate_comment
+from thesisev.deep_review import run_deep_review
 from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, ThesisDocument
 from thesisev.parser import load_document
@@ -40,9 +43,13 @@ from thesisev.rubric_utils import (
 )
 from thesisev.scoring import (
     DEFAULT_THESIS_TECH_RUBRIC,
+    FORMAT_RUBRIC_BY_SCORE_RUBRIC,
     build_content_context,
+    build_format_standards,
     calculate_score_report,
+    sum_format_rule_points,
 )
+from thesisev.scoring_format import extract_format_rules, normalize_format_spec_payload
 
 
 class UploadRequestTooLarge(Exception):
@@ -106,8 +113,7 @@ class EvaluateUploadSizeLimitMiddleware:
         """Send a standard 413 response."""
 
         response = JSONResponse(
-            status_code=413,
-            content={"detail": build_upload_too_large_message()},
+            status_code=413, content={"detail": build_upload_too_large_message()}
         )
         await response(scope, receive, send)
 
@@ -146,12 +152,7 @@ class ApiResponse(BaseModel):
     """Generic API response wrapper."""
 
     ok: bool
-    mode: Literal[
-        "evaluate",
-        "structure",
-        "evaluate_upload",
-        "history",
-    ]
+    mode: Literal["evaluate", "structure", "evaluate_upload", "history"]
     data: dict[str, Any]
 
 
@@ -162,16 +163,17 @@ app = FastAPI(
 )
 HISTORY_DIR = data_dir()
 HISTORY_PATH = HISTORY_DIR / "history.json"
+HISTORY_TMP_PATH = HISTORY_DIR / "history.json.tmp"
 UPLOAD_DIR = HISTORY_DIR / "uploads"
 MAX_HISTORY_ITEMS = 20
 MAX_EVALUATE_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_EVALUATE_UPLOAD_BODY_BYTES = MAX_EVALUATE_UPLOAD_BYTES + 1024 * 1024
 UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+_HISTORY_LOCK = threading.Lock()
 templates = Jinja2Templates(directory=str(templates_dir()))
 app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
 app.add_middleware(
-    EvaluateUploadSizeLimitMiddleware,
-    max_body_bytes=MAX_EVALUATE_UPLOAD_BODY_BYTES,
+    EvaluateUploadSizeLimitMiddleware, max_body_bytes=MAX_EVALUATE_UPLOAD_BODY_BYTES
 )
 
 EVALUATE_UPLOAD_FILE_DEFAULT = File(default=None)
@@ -191,6 +193,101 @@ PRESET_CONFIGS: dict[str, dict[str, str]] = {
         "format": "score_report_iot_f.json",
     },
 }
+
+#: In-process background evaluation queue.  Uploads return a ``job_id``
+#: immediately and the blocking parse + LLM pipeline runs on a bounded
+#: thread pool so the event loop never stalls under concurrent uploads.
+EVALUATE_MAX_WORKERS = 2
+MAX_JOBS = 20
+_EVALUATE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=EVALUATE_MAX_WORKERS, thread_name_prefix="thesisev-eval"
+)
+_JOB_LOCK = threading.Lock()
+_JOBS: dict[str, dict[str, Any]] = {}
+
+
+def register_evaluation_job() -> dict[str, Any]:
+    """Create a queued job record and trim finished jobs beyond the cap."""
+
+    job_id = uuid.uuid4().hex
+    record = {
+        "job_id": job_id,
+        "status": "queued",
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "result": None,
+        "error": None,
+    }
+    with _JOB_LOCK:
+        _JOBS[job_id] = record
+        finished = [
+            key for key, job in _JOBS.items() if job["status"] in {"done", "error"}
+        ]
+        for key in finished[: max(0, len(_JOBS) - MAX_JOBS)]:
+            _JOBS.pop(key, None)
+    return record
+
+
+def get_evaluation_job(job_id: str) -> dict[str, Any] | None:
+    """Return a shallow copy of the job record, if present."""
+
+    with _JOB_LOCK:
+        record = _JOBS.get(job_id)
+        return dict(record) if record is not None else None
+
+
+def update_evaluation_job(job_id: str, **fields: Any) -> None:
+    """Update job fields under the registry lock."""
+
+    with _JOB_LOCK:
+        record = _JOBS.get(job_id)
+        if record is not None:
+            record.update(fields)
+
+
+def run_evaluation_job(
+    *,
+    job_id: str,
+    source: Path,
+    provider: str,
+    model: str | None,
+    temperature: float,
+    max_tokens: int,
+    rubric_filename: str,
+    rubric_summary: dict[str, Any] | None,
+    format_summary: dict[str, Any] | None,
+    preset: str,
+) -> None:
+    """Run the full evaluation pipeline on a worker thread.
+
+    The uploaded source file is kept until the worker finishes so the
+    blocking parse step owns its lifecycle; it is cleaned up afterwards.
+    """
+
+    try:
+        result = evaluate_document(
+            source,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            rubric_filename=rubric_filename,
+            rubric=rubric_summary,
+            format_requirements=format_summary,
+        )
+    except Exception as exc:
+        update_evaluation_job(job_id, status="error", error=str(exc))
+        return
+    finally:
+        cleanup_upload_file(source)
+
+    payload = result.to_dict()
+    if rubric_summary is not None:
+        payload["metadata"]["rubric"] = rubric_summary
+    if format_summary is not None:
+        payload["metadata"]["format_requirements"] = format_summary
+    payload["metadata"]["preset"] = preset
+    append_history(result)
+    update_evaluation_job(job_id, status="done", result=payload)
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -267,39 +364,59 @@ async def evaluate_upload(
     temperature: float = EVALUATE_UPLOAD_TEMPERATURE_DEFAULT,
     max_tokens: int = EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT,
 ) -> ApiResponse:
-    """Evaluate an uploaded thesis file."""
+    """Submit an uploaded thesis file for background evaluation.
+
+    The upload is persisted and the blocking pipeline is queued on a bounded
+    worker pool; the caller polls ``GET /evaluate/jobs/{job_id}`` for the
+    result instead of blocking the event loop for the whole review.
+    """
 
     try:
         rubric_filename, format_filename = resolve_preset_files(preset)
         source = await resolve_thesis_source(file)
-        try:
-            rubric_summary = load_builtin_rubric_summary(rubric_filename)
-            format_summary = load_builtin_format_requirements_summary(format_filename)
-            result = evaluate_document(
-                source,
-                provider=provider,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                rubric_filename=rubric_filename,
-                rubric=rubric_summary,
-                format_requirements=format_summary,
-            )
-        finally:
-            cleanup_upload_file(source)
-        if rubric_summary is not None:
-            result.metadata["rubric"] = rubric_summary
-        if format_summary is not None:
-            result.metadata["format_requirements"] = format_summary
-        result.metadata["preset"] = preset
+        rubric_summary = load_builtin_rubric_summary(rubric_filename)
+        format_summary = load_builtin_format_requirements_summary(format_filename)
     except HTTPException:
         raise
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    append_history(result)
-    return ApiResponse(ok=True, mode="evaluate_upload", data=result.to_dict())
+
+    job = register_evaluation_job()
+    _EVALUATE_EXECUTOR.submit(
+        run_evaluation_job,
+        job_id=job["job_id"],
+        source=source,
+        provider=provider,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        rubric_filename=rubric_filename,
+        rubric_summary=rubric_summary,
+        format_summary=format_summary,
+        preset=preset,
+    )
+    return ApiResponse(
+        ok=True,
+        mode="evaluate_upload",
+        data={"job_id": job["job_id"], "status": job["status"]},
+    )
+
+
+@app.get("/evaluate/jobs/{job_id}", response_model=ApiResponse)
+def evaluate_job_status(job_id: str) -> ApiResponse:
+    """Return the current status and, once finished, the evaluation result."""
+
+    job = get_evaluation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="evaluation job not found")
+    data: dict[str, Any] = {
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "error": job["error"],
+    }
+    if job["status"] == "done" and job.get("result") is not None:
+        data["result"] = job["result"]
+    return ApiResponse(ok=True, mode="evaluate_upload", data=data)
 
 
 def validate_source_path(path: str) -> Path:
@@ -361,15 +478,36 @@ async def resolve_thesis_source(file: UploadFile | None) -> Path:
 
 
 def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
-    """Load a bundled rubric summary."""
+    """Load a bundled rubric summary.
+
+    When the rubric preset has a paired structured format file, its format
+    item is appended so the displayed ``total_score`` matches the scoring
+    engine's ``raw_total`` (which already includes the format criterion).
+    """
 
     payload = parse_json_file(config_dir() / filename, name="rubric")
     items = normalize_rubric_payload(payload)
+    format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(filename)
+    if format_filename and not any(
+        item.get("criterion") == "格式规范" for item in items
+    ):
+        format_spec = normalize_format_spec_payload(
+            parse_json_file(config_dir() / format_filename, name="format rubric")
+        )
+        rules = extract_format_rules(format_spec)
+        items = [
+            *items,
+            {
+                "criterion": "格式规范",
+                "key": "format",
+                "standard": build_format_standards(rules),
+                "score": sum_format_rule_points(rules),
+                "evaluation": "local",
+            },
+        ]
     return {
         "items": items,
-        "total_score": round(
-            sum(item["score"] for item in items), 4
-        ),
+        "total_score": round(sum(item["score"] for item in items), 4),
         "source_name": filename,
     }
 
@@ -416,8 +554,7 @@ async def store_upload_file(
                 next_written = written + len(chunk)
                 if next_written > MAX_EVALUATE_UPLOAD_BYTES:
                     raise HTTPException(
-                        status_code=413,
-                        detail=build_upload_too_large_message(),
+                        status_code=413, detail=build_upload_too_large_message()
                     )
                 written = next_written
                 output.write(chunk)
@@ -472,10 +609,7 @@ def run_api() -> None:
 
 
 def build_topic_analysis(
-    document: ThesisDocument,
-    *,
-    rubric_filename: str,
-    rubric: dict[str, Any] | None,
+    document: ThesisDocument, *, rubric_filename: str, rubric: dict[str, Any] | None
 ) -> dict[str, object]:
     """Build topic analysis using report rubric standards when available."""
 
@@ -512,9 +646,7 @@ def evaluate_document(
 
     document = load_document(path)
     topic_analysis = build_topic_analysis(
-        document,
-        rubric_filename=rubric_filename,
-        rubric=rubric,
+        document, rubric_filename=rubric_filename, rubric=rubric
     )
     statistics = build_statistics(document, topic_analysis=topic_analysis)
     issue_groups = detect_issue_groups(document)
@@ -561,6 +693,16 @@ def evaluate_document(
         root_sections=document.root_sections,
         model_config=runtime_model_config,
     )
+    if runtime_model_config.is_available():
+        deep_issues = run_deep_review(
+            document=document,
+            model_config=runtime_model_config,
+            existing_issues=issues,
+        )
+        if deep_issues:
+            issues = [*issues, *deep_issues]
+    else:
+        deep_issues = []
     return EvaluationResult(
         document=document,
         statistics=statistics,
@@ -609,19 +751,33 @@ def structure_document(path: str | Path) -> ThesisDocument:
 
 
 def append_history(result) -> None:
-    """Append a compact evaluation summary to local history."""
+    """Append a compact evaluation summary to local history.
 
-    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    items = read_history()
-    items.insert(0, build_history_entry(result))
-    HISTORY_PATH.write_text(
-        json.dumps(items[:MAX_HISTORY_ITEMS], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    Reads, inserts, and writes happen under a process-wide lock, and the file
+    is replaced atomically via ``os.replace``, so concurrent evaluations and
+    multi-worker deployments cannot drop or corrupt entries.
+    """
+
+    with _HISTORY_LOCK:
+        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        items = read_history_unlocked()
+        items.insert(0, build_history_entry(result))
+        HISTORY_TMP_PATH.write_text(
+            json.dumps(items[:MAX_HISTORY_ITEMS], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        HISTORY_TMP_PATH.replace(HISTORY_PATH)
 
 
 def read_history() -> list[dict[str, Any]]:
     """Read stored history entries from disk."""
+
+    with _HISTORY_LOCK:
+        return read_history_unlocked()
+
+
+def read_history_unlocked() -> list[dict[str, Any]]:
+    """Read history entries without acquiring the history lock."""
 
     if not HISTORY_PATH.exists():
         return []
