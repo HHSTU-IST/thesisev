@@ -193,7 +193,7 @@ def extract_title_keywords(title: str) -> list[str]:
     """Extract compact title keywords while skipping generic thesis terms."""
 
     parts = re.split(r"[的与及和：:（）()\-\s]+", title)
-    keywords = []
+    keywords: list[str] = []
     for part in parts:
         stripped = part.strip()
         if not stripped:

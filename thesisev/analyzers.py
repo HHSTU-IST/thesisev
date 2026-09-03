@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 import tiktoken
 
@@ -934,7 +934,7 @@ def normalize_domain_phrase(phrase: str) -> str:
     compact = phrase.strip()
     for target in DOMAIN_KEY_PHRASES:
         if target in compact:
-            return target
+            return cast(str, target)
     if compact.endswith("和句子") and "段落" in compact:
         return "句子识别"
     if compact.startswith("识别") and len(compact) <= 6:

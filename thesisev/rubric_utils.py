@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, cast
 
 
 @dataclass(slots=True)
@@ -75,7 +75,8 @@ def normalize_criterion_name(criterion: Any) -> str:
     if not isinstance(criterion, str) or not criterion.strip():
         msg = "rubric criterion must be a non-empty string"
         raise ValueError(msg)
-    return re.split(r"[：:]", criterion.strip(), maxsplit=1)[0].strip()
+    text = cast(str, criterion).strip()
+    return str(re.split(r"[：:]", text, maxsplit=1)[0]).strip()
 
 
 def parse_standards(value: Any) -> list[str]:
@@ -143,7 +144,7 @@ def parse_rubric_criterion(criterion: Any) -> str:
     if not isinstance(criterion, str) or not criterion.strip():
         msg = "rubric criterion must be a non-empty string"
         raise ValueError(msg)
-    return criterion.strip()
+    return cast(str, criterion).strip()
 
 
 def parse_rubric_score(score: Any) -> float:
@@ -266,14 +267,14 @@ def parse_format_requirement_label(label: Any) -> str:
     if not isinstance(label, str) or not label.strip():
         msg = "format requirement label must be a non-empty string"
         raise ValueError(msg)
-    return label.strip()
+    return cast(str, label).strip()
 
 
 def stringify_format_requirement_value(value: Any) -> str:
     """Convert a format-requirements value into compact display text."""
 
     if isinstance(value, str):
-        text = value.strip()
+        text = cast(str, value).strip()
         if not text:
             msg = "format requirement value must not be empty"
             raise ValueError(msg)

@@ -584,7 +584,7 @@ def resolve_rubric_items(
     if rubric and rubric.get("items"):
         return merge_rubric_items(
             default_items, normalize_rubric_items(rubric["items"], require_all=False)
-        ), rubric.get("source_name", "uploaded_rubric.json")
+        ), str(rubric.get("source_name") or "uploaded_rubric.json")
     return default_items, rubric_filename
 
 

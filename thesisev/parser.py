@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from docx import Document as load_docx_document
@@ -109,7 +109,7 @@ def extract_document_title(text: str, *, fallback: str) -> str:
             match = pattern.match(line)
             if match is None:
                 continue
-            candidate = match.group("title").strip()
+            candidate = cast(str, match.group("title")).strip()
             if is_document_title_candidate(candidate):
                 return candidate
     return next((line for line in lines if is_document_title_candidate(line)), fallback)
@@ -594,7 +594,9 @@ def read_docx_font_name(element_owner: Any) -> str | None:
             value = fonts.get(qn(attribute))
             if value:
                 return str(value)
-    return getattr(getattr(element_owner, "font", None), "name", None)
+    font = getattr(element_owner, "font", None)
+    name = getattr(font, "name", None)
+    return name if isinstance(name, str) else None
 
 
 def extract_docx_table_snapshot(table: Any) -> dict[str, Any]:
@@ -743,9 +745,8 @@ def normalize_docx_alignment(value: Any) -> str | None:
 
     if value is None:
         return None
-    token = getattr(value, "name", None)
-    if token is None:
-        token = str(value)
+    token_value = getattr(value, "name", None)
+    token = str(value) if token_value is None else cast(str, token_value)
     token = token.replace("WD_PARAGRAPH_ALIGNMENT.", "").replace("_", " ")
     token = token.strip().lower()
     aliases = {
@@ -842,15 +843,15 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
 
     markdown_match = MARKDOWN_HEADING_PATTERN.match(line)
     if markdown_match is not None:
-        line = markdown_match.group(1).strip()
+        line = cast(str, markdown_match.group(1)).strip()
 
     if is_reference_heading(line):
         return 1, line, line, line
 
     match = SECTION_PATTERN.match(line)
     if match is not None:
-        numbering = match.group("prefix").strip()
-        title = match.group("title").strip()
+        numbering = cast(str, match.group("prefix")).strip()
+        title = cast(str, match.group("title")).strip()
         return infer_level(numbering), title, numbering, line
     return None
 

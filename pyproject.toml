@@ -93,5 +93,27 @@ combine-as-imports = true
 force-wrap-aliases = true
 order-by-type = true
 
-[tool.ty]
+[tool.ty.environment]
 python-version = "3.14"
+
+[tool.ty.rules]
+# ty has no preset switch; enable every stable rule at error to match the
+# strictest level (previously pyrefly strict preset) and fail loudly on
+# implicit-any/unsound patterns.
+all = "error"
+
+[tool.ty.src]
+include = [
+  "thesisev",
+  "tests",
+]
+exclude = [
+  ".venv",
+  ".workbuddy",
+  "data",
+  "build",
+  "dist",
+]
+
+[tool.ty.terminal]
+output-format = "full"

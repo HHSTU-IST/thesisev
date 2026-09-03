@@ -45,6 +45,20 @@ uv run thesisev examples/sample_thesis.md --preset report_iot
 open http://127.0.0.1:8000
 ```
 
+## 开发与质量检查
+
+```bash
+uv sync --group dev        # 安装 ruff / ty / pytest 等开发依赖
+
+uv run ruff check thesisev tests      # lint
+uv run ruff format thesisev tests     # 格式化
+uv run ty check                       # 类型检查（[tool.ty] rules.all = "error"，最严级别）
+uv run pytest tests -q                # 回归测试
+
+# 或一键执行以上全部检查：
+./scripts/check_all.sh
+```
+
 ## CLI
 
 只接受 `md` 或 `docx` 文件输入：
