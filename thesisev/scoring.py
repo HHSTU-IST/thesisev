@@ -63,6 +63,12 @@ THESIS_LOCAL_SCORER_KEYS = frozenset(
     }
 )
 
+#: Stand-in text the scoring prompt puts in the JSON skeleton.  The skeleton is
+#: pre-filled with the real criterion identity, so a model that answers by
+#: echoing it verbatim would otherwise be recorded as a genuine score; the
+#: placeholder is rejected instead so the item falls back to the local rules.
+PROMPT_PLACEHOLDER = "..."
+
 
 class ScoreReport:
     """Normalized score report derived from rubric criteria."""
@@ -427,10 +433,24 @@ def build_score_prompt(
     rubric_items: list[RubricItem],
     rubric_filename: str,
 ) -> str:
-    """Build an LLM prompt that exposes content evidence only."""
+    """Build an LLM prompt that exposes content evidence only.
+
+    The JSON skeleton is pre-filled with the real ``key`` / ``name`` /
+    ``max_score`` of the requested items.  An earlier revision illustrated the
+    shape with the *first* rubric item's name and score as a bare example, and
+    a small local model copied those literals back instead of reading the
+    rubric -- every other item then failed to parse and silently fell back to
+    the local rules.  Pre-filling makes a lazy copy produce the correct
+    identity, so only the judgement fields are left to the model.
+    """
 
     rubric_summary = [
-        {"name": item.name, "score": item.max_score, "standards": item.standards}
+        {
+            "key": item.key or item.name,
+            "name": item.name,
+            "max_score": item.max_score,
+            "standards": item.standards,
+        }
         for item in rubric_items
     ]
     payload = {
@@ -438,23 +458,40 @@ def build_score_prompt(
         "rubric_source": rubric_filename,
         "rubric": rubric_summary,
     }
+    skeleton = {
+        "criteria": [
+            {
+                "key": item.key or item.name,
+                "name": item.name,
+                "score": 0,
+                "max_score": item.max_score,
+                "evidence": [PROMPT_PLACEHOLDER],
+                "deductions": [PROMPT_PLACEHOLDER],
+                "suggestions": [PROMPT_PLACEHOLDER],
+            }
+            for item in rubric_items
+        ],
+        "raw_score": 0,
+        "raw_total": sum(item.max_score for item in rubric_items),
+        "score": 0,
+    }
     return (
-        "请根据以下论文信息，为评分标准中列出的每一项打分，并输出严格 JSON。\n"
-        "JSON 结构必须为：\n"
-        "{"
-        '"criteria":[{"key":"选题及工作量","name":"选题及工作量","score":0,"max_score":20,'
-        '"evidence":["..."],"deductions":["..."],"suggestions":["..."]}...],'
-        '"raw_score":0,"raw_total":0,"score":0'
-        "}\n"
+        "请根据以下论文信息，为 rubric 中列出的评分项打分，并输出严格 JSON。\n"
+        "输出必须严格套用下面这个骨架：\n"
+        f"{json.dumps(skeleton, ensure_ascii=False)}\n"
+        "骨架中 criteria 的长度、以及每项的 key、name、max_score 都是给定值，"
+        "必须原样保留，不得增删、改名或替换成其他评分项。\n"
+        "你只需要把每项的 score、evidence、deductions、suggestions "
+        "替换成该项的真实评分内容；这四个字段都必须写成具体的中文句子，"
+        f'不得保留 "{PROMPT_PLACEHOLDER}" 这类占位符。\n'
         "要求：\n"
-        "1. criteria 必须覆盖 rubric 中的全部项目。\n"
-        "2. score 为百分制总分，raw_score 为各项原始分总和，"
+        "1. score 为百分制总分，raw_score 为各项原始分总和，"
         "raw_total 为各项满分总和。\n"
-        "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
-        "4. 评分必须参考评分标准，但分数由你综合判断。\n"
-        "5. 证据、扣分原因、建议都要简洁具体；"
+        "2. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
+        "3. 评分必须参考评分标准，但分数由你综合判断。\n"
+        "4. 证据、扣分原因、建议都要简洁具体；"
         "任何低于满分的评分项，deductions 必须给出具体扣分理由，不能留空。\n"
-        "6. 只能依据 content_context 中的内容证据评分；"
+        "5. 只能依据 content_context 中的内容证据评分；"
         "不得推测或评价格式、标点和口语化表达。\n"
         f"内容证据：{json.dumps(payload, ensure_ascii=False)}"
     )
@@ -482,19 +519,30 @@ def normalize_llm_score_criteria(
     """Normalize LLM score payload into score criteria."""
 
     rubric_by_name = {item.name: item for item in rubric_items}
-    item_by_key = {item.name: item.name for item in rubric_items}
     criteria_payload = payload.get("criteria", [])
     if not isinstance(criteria_payload, list):
         raise TypeError("llm score payload criteria must be a list")
+    # A one-item request carries no ambiguity: when the model answers under some
+    # other criterion's name, bind the entry to the only item requested rather
+    # than discarding an otherwise usable score.  Seen with small local models.
+    allow_single_bind = len(rubric_items) == 1 and len(criteria_payload) == 1
 
     criteria: list[ScoreCriterion] = []
     for entry in criteria_payload:
         if not isinstance(entry, dict):
             raise TypeError("llm score payload criteria entry must be an object")
         name = str(entry.get("name") or entry.get("key") or "").strip()
-        if name not in rubric_by_name:
-            raise ValueError(f"unknown rubric criterion: {name}")
-        rubric_item = rubric_by_name[name]
+        rubric_item = rubric_by_name.get(name)
+        if rubric_item is None:
+            if not allow_single_bind:
+                raise ValueError(f"unknown rubric criterion: {name}")
+            rubric_item = rubric_items[0]
+            logger.warning(
+                "llm labelled the response %r but only %r was requested; "
+                "binding the entry to the requested item",
+                name,
+                rubric_item.name,
+            )
         raw_score = parse_score_value(entry.get("score", 0))
         clamped_score = round(min(max(raw_score, 0.0), rubric_item.max_score), 2)
         evidence = parse_string_list(entry.get("evidence", []))
@@ -519,9 +567,16 @@ def normalize_llm_score_criteria(
             max_score=rubric_item.max_score,
             deductions=deductions,
         )
+        suggestions = parse_string_list(entry.get("suggestions", []))
+        reject_prompt_placeholders(
+            criterion_name=rubric_item.name,
+            evidence=evidence,
+            deductions=deductions,
+            suggestions=suggestions,
+        )
         criteria.append(
             ScoreCriterion(
-                key=str(entry.get("key") or item_by_key[name]),
+                key=rubric_item.key or rubric_item.name,
                 name=rubric_item.name,
                 score=score,
                 max_score=rubric_item.max_score,
@@ -529,12 +584,34 @@ def normalize_llm_score_criteria(
                 evaluation="llm",
                 evidence=evidence,
                 deductions=deductions,
-                suggestions=parse_string_list(entry.get("suggestions", [])),
+                suggestions=suggestions,
             )
         )
     if len(criteria) != len(rubric_items):
         raise ValueError("llm score payload criteria count does not match rubric items")
     return criteria
+
+
+def reject_prompt_placeholders(
+    *,
+    criterion_name: str,
+    evidence: list[str],
+    deductions: list[str],
+    suggestions: list[str],
+) -> None:
+    """Reject a scoring response that echoed the prompt's skeleton verbatim."""
+
+    for field_name, values in (
+        ("evidence", evidence),
+        ("deductions", deductions),
+        ("suggestions", suggestions),
+    ):
+        if PROMPT_PLACEHOLDER in values:
+            msg = (
+                f"llm score criterion {criterion_name} returned the prompt "
+                f"placeholder in {field_name}"
+            )
+            raise ValueError(msg)
 
 
 def parse_string_list(value: Any) -> list[str]:
