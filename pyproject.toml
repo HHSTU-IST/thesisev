@@ -3,21 +3,29 @@ name = "thesisev"
 version = "0.1.0"
 description = "A thesis evaluation assistant for structure analysis, issue detection, and comment generation."
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.136.3",
-    "jinja2>=3.1.6",
-    "langchain>=1.3.2",
-    "langchain-openai>=1.2.2",
-    "python-docx>=1.2.0",
-    "python-multipart>=0.0.20",
-    "tiktoken>=0.13.0",
-    "uvicorn>=0.48.0",
+  "fastapi>=0.141.1",
+  "jinja2>=3.1.6",
+  "langchain>=1.4.2",
+  "langchain-openai>=1.6.2",
+  "python-docx>=1.2.0",
+  "python-multipart>=0.0.32",
+  "tiktoken>=0.14.0",
+  "uvicorn>=0.53.0",
 ]
 
 [project.scripts]
 thesisev = "thesisev.cli:main"
 thesisev-api = "thesisev.api:run_api"
+
+[dependency-groups]
+dev = [
+  "pytest>=9.1.1",
+  "pytest-cov>=7.1.0",
+  "ruff>=0.16.8",
+  "ty>=0.0.82",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,17 +34,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["thesisev"]
 include = [
-    "config/*.json",
-    "config/*.toml",
-    "templates/*.html",
-    "static/*.css",
-    "static/*.js",
+  "config/*.json",
+  "config/*.toml",
+  "templates/*.html",
+  "static/*.css",
+  "static/*.js",
 ]
 
 [tool.ruff]
-fix = true
-fix-only = true
-target-version = "py313"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.format]
@@ -49,45 +55,30 @@ line-ending = "lf"
 
 [tool.ruff.lint]
 extend-select = [
-  "E",  # pycodestyle errors
-  "W",  # pycodestyle warnings
-  "F",  # pyflakes
-  "B",  # flake8-bugbear
-  "C4",  # flake8-comprehensions
-  "EM",  # flake8-errmsg
-  "FA",  # flake8-future-annotations
-  "G",  # flake8-logging-format
-  "INT",  # flake8-gettext
-  "PIE",  # flake8-pie
-  "PT",  # flake8-pytest-style
-  "PYI",  # flake8-pyi
-  "Q",  # flake8-quotes
-  "RET",  # flake8-return
-  "RSE",  # flake8-raise
-  "SLOT",  # flake8-slots
-  "T10",  # flake8-debugger
-  "YTT",  # flake8-2020
-  "DTZ",  # naive datetime
-  "I",  # import sorting
-  "ISC",  # string concatenation
-  "NPY",  # numpy specific rules
-  "PERF",  # perflint
-  "RUF",  # ruff
-  "S",  # security
-  "SIM",  # simplify
-  "TID",  # tidy imports
-  "UP",  # upgrade
+  "DTZ",
+  "E",
+  "F",
+  "I",
+  "ISC",
+  "NPY",
+  "PERF",
+  "RUF",
+  "S",
+  "SIM",
+  "TID",
+  "UP",
+  "W",
 ]
 fixable = ["ALL"]
 ignore = [
-  "EM101",  # exception must not use a string literal
-  "EM102",  # exception must not use an f-string literal
-  "ISC001",  # conflicts with formatter
-  "E501",  # line too long
-  "RUF001",  # string contains ambiguous character (such as greek letters)
-  "RUF002",  # docstring contains ambiguous character (such as greek letters)
-  "RUF003",  # string contains non-ASCII character
+  "RUF001",
+  "RUF002",
+  "RUF003",
+  "S101",
+  "S310",
+  "S603",
 ]
+
 unfixable = []
 
 [tool.ruff.lint.pydocstyle]
@@ -98,3 +89,32 @@ case-sensitive = true
 combine-as-imports = true
 force-wrap-aliases = true
 order-by-type = true
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.rules]
+# ty has no preset switch; enable every stable rule at error to match the
+# strictest level (previously pyrefly strict preset) and fail loudly on
+# implicit-any/unsound patterns.
+all = "error"
+
+[tool.ty.src]
+include = [
+  "thesisev",
+  "tests",
+]
+exclude = [
+  ".venv",
+  ".workbuddy",
+  "data",
+  "build",
+  "dist",
+]
+# `tests/` is in .gitignore, and ty honours ignore files by default — which
+# would silently drop it from the `include` above. Opt out so the declared
+# source set is what actually gets checked.
+respect-ignore-files = false
+
+[tool.ty.terminal]
+output-format = "full"

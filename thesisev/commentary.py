@@ -8,21 +8,23 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from thesisev.llm import ModelConfig, create_chat_model
-from thesisev.resources import load_json_resource
-
-ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
-GENERIC_TITLE_TERMS = set(ANALYZER_TERMS["generic_title_terms"])
-COMMENT_KEYWORD_NOISE_TERMS = set(ANALYZER_TERMS["comment_keyword_noise_terms"])
+from thesisev.llm import (
+    ModelConfig,
+    create_chat_model,
+    extract_response_text,
+    invoke_chat_model_with_retry,
+)
+from thesisev.models import Section, TechnologyStackItem
+from thesisev.terms import COMMENT_KEYWORD_NOISE_TERMS, GENERIC_TITLE_TERMS
 
 
 def generate_comment(
     title: str,
     keywords: list[str],
-    technology_details,
+    technology_details: list[TechnologyStackItem],
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    root_sections,
+    root_sections: list[Section],
     model_config: ModelConfig | None = None,
 ) -> tuple[str, dict[str, Any], str]:
     """Generate a concise content evaluation and validation checks."""
@@ -48,10 +50,10 @@ def generate_comment_with_llm(
     *,
     title: str,
     focus_keywords: list[str],
-    technology_details,
+    technology_details: list[TechnologyStackItem],
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    root_sections,
+    root_sections: list[Section],
     model_config: ModelConfig | None,
 ) -> tuple[str, str]:
     """Generate content commentary with an LLM and fall back to rule-based text."""
@@ -77,7 +79,8 @@ def generate_comment_with_llm(
     )
     try:
         model = create_chat_model(model_config)
-        response = model.invoke(
+        response = invoke_chat_model_with_retry(
+            model,
             [
                 SystemMessage(
                     content=(
@@ -91,9 +94,9 @@ def generate_comment_with_llm(
                     )
                 ),
                 HumanMessage(content=prompt),
-            ]
+            ],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - any LLM failure falls back to the template
         return fallback, "fallback"
 
     content = extract_response_text(response).strip()
@@ -106,10 +109,10 @@ def build_rule_based_comment(
     *,
     title: str,
     focus_keywords: list[str],
-    technology_details,
+    technology_details: list[TechnologyStackItem],
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    root_sections,
+    root_sections: list[Section],
 ) -> str:
     """Build the original deterministic comment as a safe fallback."""
 
@@ -124,10 +127,10 @@ def build_comment_prompt(
     *,
     title: str,
     focus_keywords: list[str],
-    technology_details,
+    technology_details: list[TechnologyStackItem],
     topic_keywords: list[str],
     topic_relevance_ratio: float,
-    root_sections,
+    root_sections: list[Section],
 ) -> str:
     """Build an LLM prompt from content-related thesis signals."""
 
@@ -151,23 +154,6 @@ def build_comment_prompt(
         "格式、标点、排版或评分。"
         "请输出一段中文内容评价，不要分点。"
     )
-
-
-def extract_response_text(response: Any) -> str:
-    """Extract text content from a LangChain response object."""
-
-    content = getattr(response, "content", "")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-        return "".join(parts)
-    return str(content)
 
 
 def select_comment_keywords(title: str, fallback_keywords: list[str]) -> list[str]:
@@ -203,7 +189,7 @@ def extract_title_keywords(title: str) -> list[str]:
     """Extract compact title keywords while skipping generic thesis terms."""
 
     parts = re.split(r"[的与及和：:（）()\-\s]+", title)
-    keywords = []
+    keywords: list[str] = []
     for part in parts:
         stripped = part.strip()
         if not stripped:
@@ -218,23 +204,7 @@ def extract_title_keywords(title: str) -> list[str]:
     return keywords
 
 
-def summarize_structure(root_sections) -> str:
-    """Summarize structural completeness from section distribution."""
-
-    if not root_sections:
-        return "结构信息暂不充分"
-    top_ratio = max(section.ratio for section in root_sections)
-    section_count = len(root_sections)
-    if section_count >= 3 and top_ratio <= 0.45:
-        return "章节安排较为均衡"
-    if top_ratio >= 0.6:
-        return "章节分配略有失衡"
-    if section_count >= 2:
-        return "章节结构基本完整"
-    return "结构层次仍可进一步完善"
-
-
-def summarize_technology(technology_details) -> str:
+def summarize_technology(technology_details: list[TechnologyStackItem]) -> str:
     """Summarize technology extraction results for the comment."""
 
     if not technology_details:
