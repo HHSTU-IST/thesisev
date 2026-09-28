@@ -349,9 +349,8 @@ def normalize_structured_format_requirements(
             if not isinstance(rule, dict):
                 continue
             rule_count += 1
-            check: dict[str, Any] = rule.get("check", {})
-            if not isinstance(check, dict):
-                check = {}
+            raw_check = rule.get("check", {})
+            check: dict[str, Any] = raw_check if isinstance(raw_check, dict) else {}
             rule_label = str(rule.get("label") or rule.get("id") or "").strip()
             display_items.append(
                 {

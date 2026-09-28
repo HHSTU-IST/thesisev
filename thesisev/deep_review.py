@@ -46,7 +46,7 @@ def run_deep_review(
 ) -> list[Issue]:
     """Run the optional LLM logic/tone review, degrading safely to empty."""
 
-    if model_config is None or not model_config.is_available():
+    if not model_config.is_available():
         return []
     prompt = build_deep_review_prompt(document)
     try:

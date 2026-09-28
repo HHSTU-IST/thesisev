@@ -416,7 +416,7 @@ def evaluate_docx_paragraph_rule(
 
 
 def collect_docx_rule_paragraphs(
-    paragraphs: list[dict[str, Any]],
+    paragraphs: list[Any],
     *,
     scope_styles: list[str],
     style_expected: str | None,
@@ -430,6 +430,9 @@ def collect_docx_rule_paragraphs(
     style hints, body paragraphs after the first level-one heading are used,
     excluding explicit heading styles. Empty paragraphs and (for run rules)
     run-less paragraphs are skipped because they carry no format signal.
+
+    ``paragraphs`` is read straight out of the untyped format snapshot, so
+    entries that are not mappings are dropped here rather than downstream.
     """
 
     candidates = select_body_paragraphs(
