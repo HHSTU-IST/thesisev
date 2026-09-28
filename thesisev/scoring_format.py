@@ -71,8 +71,8 @@ def score_format_compliance(
 ) -> ScoreCriterion:
     """Score one local format rubric item from a bundled structured spec.
 
-    Shared by every preset (thesis_tech / report_iot / uploads). The concrete
-    spec file is resolved per rubric, so one engine serves all presets.
+    The concrete spec file is resolved per rubric, so the same engine serves
+    both the built-in preset and uploaded rubrics.
     """
 
     format_spec = normalize_format_spec_payload(load_json_resource(format_filename))
@@ -473,7 +473,7 @@ def collect_docx_rule_paragraphs(
     run-less paragraphs are skipped because they carry no format signal.
     """
 
-    candidates = select_report_body_paragraphs(
+    candidates = select_body_paragraphs(
         [paragraph for paragraph in paragraphs if isinstance(paragraph, dict)]
     )
     wanted = [*scope_styles]
@@ -534,10 +534,10 @@ def build_rule_suggestion(rule: dict[str, Any]) -> str:
     return f"请核对{label}"
 
 
-def select_report_body_paragraphs(
+def select_body_paragraphs(
     paragraphs: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Prefer report body paragraphs after the first level-one heading."""
+    """Prefer body paragraphs after the first level-one heading."""
 
     for index, paragraph in enumerate(paragraphs):
         if normalize_docx_expected_token(

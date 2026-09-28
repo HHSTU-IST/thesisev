@@ -43,13 +43,11 @@ from thesisev.scoring_format import (
     parse_float_value,
     score_format_compliance,
 )
-from thesisev.scoring_iot import OWNED_IOT_ITEM_NAMES, score_iot_item_locally
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
 FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
-    "score_report_iot.json": "score_report_iot_f.json",
     "score_thesis_tech.json": "score_thesis_tech_f.json",
 }
 
@@ -222,9 +220,7 @@ def validate_rubric_local_scorability(
     """
 
     thesis_tech = rubric_filename.startswith("score_thesis_tech")
-    supported = (
-        THESIS_LOCAL_SCORER_KEYS | {FORMAT_RUBRIC_KEY} | set(OWNED_IOT_ITEM_NAMES)
-    )
+    supported = THESIS_LOCAL_SCORER_KEYS | {FORMAT_RUBRIC_KEY}
     for item in rubric_items:
         if item.evaluation == "llm" and not thesis_tech:
             continue
@@ -333,17 +329,6 @@ def score_item_locally(
             rubric_item=rubric_item,
             format_filename=format_filename,
         )
-    if key in OWNED_IOT_ITEM_NAMES or rubric_item.name in OWNED_IOT_ITEM_NAMES:
-        iot_criterion = score_iot_item_locally(
-            document=document,
-            format_issues=format_issues,
-            writing_issues=writing_issues,
-            technology_details=technology_details,
-            format_requirements=format_requirements,
-            rubric_item=rubric_item,
-        )
-        if iot_criterion is not None:
-            return iot_criterion
     return build_criterion(
         key=key,
         rubric_item=rubric_item,

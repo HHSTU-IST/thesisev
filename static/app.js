@@ -241,7 +241,7 @@ function appendScoreEvidence(parent, item) {
     parent.appendChild(buildSubline("证据: 暂无证据"));
     return;
   }
-  if (item.key !== "iot_format" && item.name !== "格式规范") {
+  if (item.name !== "格式规范") {
     parent.appendChild(buildSubline(`证据: ${evidenceItems.join("；")}`));
     return;
   }

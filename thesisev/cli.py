@@ -60,9 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--preset",
-        choices=("thesis_tech", "report_iot"),
+        choices=("thesis_tech",),
         default="thesis_tech",
-        help="Built-in scoring preset, such as thesis_tech or report_iot.",
+        help="Built-in scoring preset. Currently only thesis_tech is supported.",
     )
     return parser
 

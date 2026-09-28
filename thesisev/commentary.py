@@ -15,11 +15,7 @@ from thesisev.llm import (
     invoke_chat_model_with_retry,
 )
 from thesisev.models import Section, TechnologyStackItem
-from thesisev.resources import load_json_resource
-
-ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
-GENERIC_TITLE_TERMS = set(ANALYZER_TERMS["generic_title_terms"])
-COMMENT_KEYWORD_NOISE_TERMS = set(ANALYZER_TERMS["comment_keyword_noise_terms"])
+from thesisev.terms import COMMENT_KEYWORD_NOISE_TERMS, GENERIC_TITLE_TERMS
 
 
 def generate_comment(

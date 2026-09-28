@@ -8,6 +8,7 @@
 - 内容评分项默认由大模型打分，未配置 API Key 时回退到本地规则
 - 内容评价由大模型生成，未配置 API Key 时使用本地模板
 - 评分标准与格式要求均来自程序内置 `json` 文件，评分项以稳定 `key` 关联代码，不依赖中文标签
+- 分析词表（技术栈别名、通用术语、短语与动作词）内联在 `thesisev/terms.py`，属于算法启发式而非评分规则，不占用配置文件
 
 ## 主要功能
 
@@ -35,7 +36,7 @@ uv sync
 
 ```bash
 uv run thesisev examples/sample_thesis.md
-uv run thesisev examples/sample_thesis.md --preset report_iot
+uv run thesisev examples/sample_thesis.md --json
 ```
 
 启动 Web UI：
@@ -66,11 +67,11 @@ uv run pytest tests -q                # 回归测试
 ```bash
 uv run thesisev examples/sample_thesis.md
 uv run thesisev examples/sample_thesis.md --output structure
-uv run thesisev examples/sample_thesis.md --preset report_iot
-uv run thesisev examples/sample_thesis.md --preset report_iot --json
+uv run thesisev examples/sample_thesis.md --preset thesis_tech
+uv run thesisev examples/sample_thesis.md --preset thesis_tech --json
 ```
 
-其中 `--preset` 用于选择程序内置评分预设，当前支持 `thesis_tech` 和 `report_iot`。
+其中 `--preset` 用于选择程序内置评分预设，当前仅提供 `thesis_tech`。
 
 ## API / UI
 
@@ -79,13 +80,13 @@ uv run thesisev examples/sample_thesis.md --preset report_iot --json
 open http://127.0.0.1:8000
 ```
 
-评分预设由程序内置，当前 UI 可选择的预设例如 `thesis_tech` 和 `report_iot`。对应的评分标准与格式要求会自动加载，无需上传。`report_iot` 会同时读取 `score_report_iot.json` 和 `score_report_iot_f.json`。
+评分预设由程序内置，当前 UI 仅提供 `thesis_tech`，对应的评分标准（`config/score_thesis_tech.json`）与格式要求（`config/score_thesis_tech_f.json`）会自动加载，无需上传。
 
 内置格式规则采用结构化 `json`，每条规则在 `check` 中声明 `type`、`expected` 和必要参数，便于本地解析与人工复核。
 
 ## 评分逻辑
 
-- 格式检测与格式评价由本地程序完成，包括问题清单、格式要求读取和规则化评分明细；格式分数计入总分（`raw_total` 为内容项与格式项满分之和，理工科默认 75，调研报告默认 100）。
+- 格式检测与格式评价由本地程序完成，包括问题清单、格式要求读取和规则化评分明细；格式分数计入总分（`raw_total` 为内容项与格式项满分之和，默认 75）。
 - 内容评价由 LLM 生成，当前实现位于 `thesisev/commentary.py`；未配置 API Key 时使用本地内容评价模板回退。
 - 内容评分项默认由 LLM 生成（每项一次调用），当前实现位于 `thesisev/scoring.py` 的 `calculate_score_report()`；未配置 API Key 或单次调用失败时回退到本地规则。
 - 返回结果中：
@@ -98,26 +99,18 @@ open http://127.0.0.1:8000
 
 ## 评价标准
 
-### 毕业设计
-
 - 理工科（默认 `thesis_tech`）：
   - 内容：`config/score_thesis_tech.json`（6 项）
   - 格式：`config/score_thesis_tech_f.json`（计入总分，满分 15）
-
-### 调研报告
-
-- 物联网（`report_iot`）：
-  - 内容：`config/score_report_iot.json`
-  - 格式：`config/score_report_iot_f.json`
 
 ## 毕业设计评分实现方案
 
 - `analyzers.py` 继续负责提取结构、关键词、问题、主题相关度等信号
 - `scoring.py` 负责评分编排、LLM 调用、rubric key 分发、格式项追加、结果汇总与本地可评分性自检。
 - `scoring_content.py` 负责毕业设计六项内容评分的本地规则。
-- `scoring_format.py` 负责格式规范读取、DOCX 全局合规率判定与格式扣分（thesis 与 iot 共用同一引擎）。
+- `scoring_format.py` 负责格式规范读取、DOCX 全局合规率判定与格式扣分。
 - `rubric_utils.py` 负责 rubric 解析、稳定 `key` 推断/合并与分数钳制。
-- `scoring_iot.py` 负责物联网调研报告 `report_iot` 的本地评分规则，避免专用规则继续堆在通用评分模块中。
+- `terms.py` 负责内联的分析词表（技术栈别名、通用术语、短语与动作词）。
 
 输出结构建议：
 
@@ -150,13 +143,13 @@ open http://127.0.0.1:8000
 - [x] `score_writing_quality(document, writing_issues)`：仅根据本地识别出的书面表达问题扣分；格式问题由独立格式评分链路处理。
 - [x] `score_innovation(document, technology_details)`：检测“创新/改进/优化/提出/应用价值”等表述，并结合结论章节和技术组合给启发式评分。
 
-格式评分项（`key = "format"`）由本地程序按结构化规则扣分，理工科与调研报告分别使用 `config/score_thesis_tech_f.json` 与 `config/score_report_iot_f.json`。
+格式评分项（`key = "format"`）由本地程序按结构化规则扣分，规则来自 `config/score_thesis_tech_f.json`。
 
 总分计算：
 
 ```python
 raw_score = sum(item.score for item in criteria)
-raw_total = sum(item.max_score for item in criteria)  # 含格式项：理工科 75，调研报告 100
+raw_total = sum(item.max_score for item in criteria)  # 含格式项：默认 75
 score = round(raw_score / raw_total * 100)
 ```
 
@@ -275,7 +268,7 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 
 ## 目录说明
 
-- `config/`：静态配置文件，包括规则库、关键词库和 `provider_env.toml`
+- `config/`：静态配置文件，包括评分标准与格式要求（`score_*.json`）、文本词典（`colloquial.json`、`stopwords.json`、`punctuation_*.json`）和 `provider_env.toml`
 - `data/`：运行时数据，包括历史记录和上传过程中的临时文件
 - `examples/`：可直接运行的样例论文（`sample_thesis.md`）
 - `static/`：前端静态资源，包括样式和交互脚本

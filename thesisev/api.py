@@ -22,7 +22,6 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from thesisev.analyzers import (
     TopicAnalysis,
-    annotate_report_topic_relevance,
     annotate_section_statistics,
     annotate_topic_relevance,
     build_statistics,
@@ -141,7 +140,7 @@ class EvaluateRequest(BaseModel):
     )
     preset: str = Field(
         default="thesis_tech",
-        description="Built-in rubric preset name, such as thesis_tech or report_iot.",
+        description="Built-in rubric preset name; currently only thesis_tech.",
     )
 
 
@@ -192,10 +191,6 @@ PRESET_CONFIGS: dict[str, dict[str, str]] = {
     "thesis_tech": {
         "rubric": "score_thesis_tech.json",
         "format": "score_thesis_tech_f.json",
-    },
-    "report_iot": {
-        "rubric": "score_report_iot.json",
-        "format": "score_report_iot_f.json",
     },
 }
 
@@ -615,27 +610,6 @@ def run_api() -> None:
     uvicorn.run("thesisev.api:app", host="127.0.0.1", port=8000, reload=False)
 
 
-def build_topic_analysis(
-    document: ThesisDocument, *, rubric_filename: str, rubric: dict[str, Any] | None
-) -> TopicAnalysis:
-    """Build topic analysis using report rubric standards when available."""
-
-    if rubric_filename.startswith("score_report_"):
-        report_rubric = (
-            rubric
-            if rubric is not None
-            else load_builtin_rubric_summary(rubric_filename)
-        )
-        rubric_items = report_rubric.get("items")
-        if not isinstance(rubric_items, list) or not rubric_items:
-            msg = "report rubric items must be a non-empty list"
-            raise ValueError(msg)
-        topic_analysis = annotate_report_topic_relevance(document, rubric_items)
-        topic_analysis["source"] = rubric_filename
-        return topic_analysis
-    return annotate_topic_relevance(document)
-
-
 def evaluate_document(
     path: str | Path,
     *,
@@ -652,9 +626,7 @@ def evaluate_document(
     """Evaluate a thesis document from a local path."""
 
     document = load_document(path)
-    topic_analysis = build_topic_analysis(
-        document, rubric_filename=rubric_filename, rubric=rubric
-    )
+    topic_analysis = annotate_topic_relevance(document)
     statistics = build_statistics(document, topic_analysis=dict(topic_analysis))
     issue_groups = detect_issue_groups(document)
     format_issues = issue_groups.format_issues

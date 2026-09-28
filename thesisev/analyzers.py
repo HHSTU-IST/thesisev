@@ -19,48 +19,31 @@ from thesisev.models import (
     ThesisDocument,
 )
 from thesisev.resources import load_json_resource
+from thesisev.terms import (
+    ACTION_NOISE_FRAGMENTS,
+    ACTION_OBJECT_TERMS,
+    ACTION_PREFIXES,
+    ACTION_VERBS,
+    DOMAIN_KEY_PHRASES,
+    GENERIC_ANALYSIS_TERMS,
+    GENERIC_PHRASE_TERMS,
+    GENERIC_TOPIC_TERMS,
+    PHRASE_NOISE_FRAGMENTS,
+    PHRASE_PREFIXES,
+    SECTION_HEADING_TERMS,
+    TECHNOLOGY_KEYWORDS,
+    TITLE_SUFFIXES,
+    TOPIC_NOISE_GENERIC_FRAGMENTS,
+    TOPIC_NOISE_GENERIC_TERMS,
+)
 
-KEYWORDS_TECH = load_json_resource("keywords_tech.json")
 STOPWORDS = set(load_json_resource("stopwords.json"))
-ANALYZER_TERMS = load_json_resource("analyzer_terms.json")
 COLLOQUIAL = load_json_resource("colloquial.json")
 PUNCTUATION_CHINESE = load_json_resource("punctuation_chinese.json")
 PUNCTUATION_ENGLISH = load_json_resource("punctuation_english.json")
 PUNCTUATION_REPEATED = load_json_resource("punctuation_repeated.json")
 REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
 TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
-TOPIC_NOISE_GENERIC_TERMS = set(ANALYZER_TERMS["topic_noise_generic_terms"])
-TOPIC_NOISE_GENERIC_FRAGMENTS = tuple(ANALYZER_TERMS["topic_noise_generic_fragments"])
-GENERIC_ANALYSIS_TERMS = set(ANALYZER_TERMS["generic_analysis_terms"])
-GENERIC_TOPIC_TERMS = set(ANALYZER_TERMS["generic_topic_terms"])
-GENERIC_PHRASE_TERMS = set(ANALYZER_TERMS["generic_phrase_terms"])
-REPORT_STANDARD_GENERIC_TERMS = set(ANALYZER_TERMS["report_standard_generic_terms"])
-REPORT_STANDARD_GENERIC_PREFIXES = tuple(
-    ANALYZER_TERMS["report_standard_generic_prefixes"]
-)
-REPORT_STANDARD_GENERIC_SUFFIXES = tuple(
-    ANALYZER_TERMS["report_standard_generic_suffixes"]
-)
-REPORT_STANDARD_GENERIC_ENGLISH_TERMS = set(
-    ANALYZER_TERMS["report_standard_generic_english_terms"]
-)
-REPORT_STANDARD_KEYWORD_ALIASES = {
-    key: tuple(values)
-    for key, values in ANALYZER_TERMS["report_standard_keyword_aliases"].items()
-}
-REPORT_STANDARD_EVIDENCE_TERMS = {
-    key: tuple(values)
-    for key, values in ANALYZER_TERMS["report_standard_evidence_terms"].items()
-}
-PHRASE_PREFIXES = tuple(ANALYZER_TERMS["phrase_prefixes"])
-PHRASE_NOISE_FRAGMENTS = tuple(ANALYZER_TERMS["phrase_noise_fragments"])
-DOMAIN_KEY_PHRASES = tuple(ANALYZER_TERMS["domain_key_phrases"])
-ACTION_OBJECT_TERMS = set(ANALYZER_TERMS["action_object_terms"])
-ACTION_VERBS = tuple(ANALYZER_TERMS["action_verbs"])
-ACTION_PREFIXES = tuple(ANALYZER_TERMS["action_prefixes"])
-ACTION_NOISE_FRAGMENTS = tuple(ANALYZER_TERMS["action_noise_fragments"])
-TITLE_SUFFIXES = tuple(ANALYZER_TERMS["title_suffixes"])
-SECTION_HEADING_TERMS = set(ANALYZER_TERMS["section_heading_terms"])
 
 
 @dataclass(slots=True)
@@ -131,7 +114,7 @@ def extract_technology_details(document: ThesisDocument) -> list[TechnologyStack
         return (item.category, item.name.lower())
 
     found: list[TechnologyStackItem] = []
-    for entry in KEYWORDS_TECH:
+    for entry in TECHNOLOGY_KEYWORDS:
         matched_terms = [
             alias
             for alias in entry["aliases"]
@@ -334,55 +317,6 @@ def calculate_score(issues: list[Issue], section_count: int) -> int:
     return max(60, min(98, score))
 
 
-def extract_standard_keywords(standard: str) -> list[str]:
-    """Split a report rubric standard into ordered topic keywords."""
-
-    keywords: list[str] = []
-    for token in re.findall(r"[A-Za-z][A-Za-z0-9+\-]*|[\u4e00-\u9fff]+", standard):
-        if re.search(r"[A-Za-z]", token):
-            if token.lower() not in REPORT_STANDARD_GENERIC_ENGLISH_TERMS:
-                keywords.append(token)
-            continue
-        for phrase in re.split(r"以及|的|与|和|及|或|在|对", token):
-            normalized = normalize_standard_keyword(phrase)
-            if normalized:
-                keywords.append(normalized)
-    return deduplicate_preserving_order(keywords)
-
-
-def normalize_standard_keyword(keyword: str) -> str:
-    """Remove instructional noise from one report-standard keyword."""
-
-    compact = keyword.strip()
-    changed = True
-    while changed:
-        changed = False
-        for prefix in REPORT_STANDARD_GENERIC_PREFIXES:
-            if compact.startswith(prefix) and len(compact) > len(prefix):
-                compact = compact[len(prefix) :]
-                changed = True
-                break
-    for suffix in REPORT_STANDARD_GENERIC_SUFFIXES:
-        if compact.endswith(suffix) and len(compact) > len(suffix):
-            compact = compact[: -len(suffix)]
-            break
-    if compact in REPORT_STANDARD_GENERIC_TERMS or len(compact) < 2:
-        return ""
-    return compact
-
-
-def parse_report_standards(value: object) -> list[str]:
-    """Normalize report rubric standards without importing scoring helpers."""
-
-    if value in (None, ""):
-        return []
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
-
-
 class TopicAnalysis(TypedDict, total=False):
     """Topic relevance summary shared by the analyzer and evaluation API."""
 
@@ -392,90 +326,6 @@ class TopicAnalysis(TypedDict, total=False):
     earned_score: float
     total_score: float
     source: str
-
-
-def annotate_report_topic_relevance(
-    document: ThesisDocument, rubric_items: list[dict[str, Any]]
-) -> TopicAnalysis:
-    """Annotate report sections using configured rubric-standard coverage."""
-
-    for paragraph in document.paragraphs:
-        paragraph.topic_relevance_score = 0.0
-        paragraph.topic_matched_keywords = []
-        paragraph.topic_is_relevant = False
-    for paragraph in collect_report_section_paragraphs(document.sections):
-        paragraph.topic_relevance_score = 0.0
-        paragraph.topic_matched_keywords = []
-        paragraph.topic_is_relevant = False
-    for section in collect_report_sections(document.sections):
-        section.topic_relevance_score = 0.0
-        section.topic_relevant_word_count = 0
-        section.topic_matched_keywords = []
-
-    topic_keywords: list[str] = []
-    earned_score = 0.0
-    total_score = 0.0
-    for rubric_item in rubric_items:
-        criterion = str(rubric_item.get("criterion", "")).strip()
-        if criterion == "格式规范":
-            # Format is scored by the local format engine; its standards are
-            # typographic rules, not topic signals, and must not dilute the
-            # report topic-relevance coverage or keyword lists.
-            continue
-        standards = parse_report_standards(
-            rubric_item.get("standard", rubric_item.get("standards", []))
-        )
-        max_score_value = rubric_item.get("score", rubric_item.get("max_score", 0))
-        if isinstance(max_score_value, (int, float)):
-            max_score = float(max_score_value)
-        else:
-            max_score = 0.0
-        total_score += max_score
-        standard_keywords = [
-            extract_standard_keywords(standard) for standard in standards
-        ]
-        section_keywords = deduplicate_preserving_order(
-            [keyword for keywords in standard_keywords for keyword in keywords]
-        )
-        topic_keywords.extend(section_keywords)
-        section = next(
-            (
-                candidate
-                for candidate in document.sections
-                if criterion and criterion in candidate.title
-            ),
-            None,
-        )
-        if section is None:
-            continue
-        subtree_text = "\n".join(
-            candidate.content for candidate in collect_report_sections([section])
-        )
-        covered_standard_count = sum(
-            matches_report_standard(subtree_text, standard, keywords)
-            for standard, keywords in zip(standards, standard_keywords, strict=True)
-        )
-        coverage_ratio = round(
-            covered_standard_count / max(len(standard_keywords), 1), 4
-        )
-        annotate_report_section_topic_relevance(
-            section, section_keywords, coverage_ratio
-        )
-        earned_score += max_score * coverage_ratio
-
-    mirror_report_paragraph_annotations(document)
-    relevant_word_count = sum(
-        paragraph.word_count
-        for paragraph in collect_report_section_paragraphs(document.sections)
-        if paragraph.topic_is_relevant
-    )
-    return {
-        "topic_keywords": deduplicate_preserving_order(topic_keywords),
-        "relevant_word_count": relevant_word_count,
-        "document_ratio": round(earned_score / max(total_score, 1.0), 4),
-        "earned_score": round(earned_score, 4),
-        "total_score": round(total_score, 4),
-    }
 
 
 def annotate_topic_relevance(document: ThesisDocument) -> TopicAnalysis:
@@ -565,131 +415,6 @@ def analyze_paragraph_topic_relevance(
         "matched_keywords": matched_keywords,
         "is_relevant": is_relevant,
     }
-
-
-def annotate_report_section_topic_relevance(
-    section: Section, topic_keywords: list[str], coverage_ratio: float | None = None
-) -> None:
-    """Annotate one report section subtree and its paragraphs."""
-
-    matched_keywords: set[str] = set()
-    relevant_word_count = 0
-    for paragraph in section.paragraphs:
-        paragraph_matches = [
-            keyword
-            for keyword in topic_keywords
-            if matches_report_standard_keyword(paragraph.text, keyword)
-        ]
-        paragraph.topic_relevance_score = round(
-            len(paragraph_matches) / max(len(topic_keywords), 1), 4
-        )
-        paragraph.topic_matched_keywords = paragraph_matches
-        paragraph.topic_is_relevant = bool(paragraph_matches)
-        if paragraph.topic_is_relevant:
-            relevant_word_count += paragraph.word_count
-        matched_keywords.update(paragraph_matches)
-
-    for child in section.children:
-        annotate_report_section_topic_relevance(child, topic_keywords)
-        relevant_word_count += child.topic_relevant_word_count
-        matched_keywords.update(child.topic_matched_keywords)
-
-    section.topic_relevance_score = (
-        coverage_ratio
-        if coverage_ratio is not None
-        else calculate_report_subtree_topic_relevance_score(section)
-    )
-    section.topic_relevant_word_count = relevant_word_count
-    section.topic_matched_keywords = [
-        keyword for keyword in topic_keywords if keyword in matched_keywords
-    ]
-
-
-def calculate_report_subtree_topic_relevance_score(section: Section) -> float:
-    """Calculate paragraph-weighted report relevance for one section subtree."""
-
-    paragraphs = collect_report_section_paragraphs([section])
-    weighted_score = sum(
-        paragraph.topic_relevance_score * paragraph.word_count
-        for paragraph in paragraphs
-    )
-    word_count = sum(paragraph.word_count for paragraph in paragraphs)
-    return round(weighted_score / max(word_count, 1), 4)
-
-
-def collect_report_sections(sections: list[Section]) -> list[Section]:
-    """Collect report sections and descendants once in document order."""
-
-    collected: list[Section] = []
-    seen: set[int] = set()
-
-    def collect(section: Section) -> None:
-        if id(section) in seen:
-            return
-        seen.add(id(section))
-        collected.append(section)
-        for child in section.children:
-            collect(child)
-
-    for section in sections:
-        collect(section)
-    return collected
-
-
-def collect_report_section_paragraphs(sections: list[Section]) -> list[Paragraph]:
-    """Collect direct section paragraphs once across a report section tree."""
-
-    paragraphs: list[Paragraph] = []
-    seen: set[int] = set()
-    for section in collect_report_sections(sections):
-        for paragraph in section.paragraphs:
-            if id(paragraph) in seen:
-                continue
-            seen.add(id(paragraph))
-            paragraphs.append(paragraph)
-    return paragraphs
-
-
-def mirror_report_paragraph_annotations(document: ThesisDocument) -> None:
-    """Mirror section paragraph annotations onto flattened document paragraphs."""
-
-    source_paragraphs = collect_report_section_paragraphs(document.sections)
-    source_by_identity = {id(paragraph): paragraph for paragraph in source_paragraphs}
-    sources_by_key: dict[tuple[int, str], list[Paragraph]] = defaultdict(list)
-    sources_by_text: dict[str, list[Paragraph]] = defaultdict(list)
-    for paragraph in source_paragraphs:
-        sources_by_key[(paragraph.index, paragraph.text)].append(paragraph)
-        sources_by_text[paragraph.text].append(paragraph)
-
-    consumed: set[int] = set()
-    for paragraph in reversed(document.paragraphs):
-        source = source_by_identity.get(id(paragraph))
-        if source is None:
-            source = next(
-                (
-                    candidate
-                    for candidate in reversed(
-                        sources_by_key[(paragraph.index, paragraph.text)]
-                    )
-                    if id(candidate) not in consumed
-                ),
-                None,
-            )
-        if source is None:
-            source = next(
-                (
-                    candidate
-                    for candidate in reversed(sources_by_text[paragraph.text])
-                    if id(candidate) not in consumed
-                ),
-                None,
-            )
-        if source is None:
-            continue
-        consumed.add(id(source))
-        paragraph.topic_relevance_score = source.topic_relevance_score
-        paragraph.topic_matched_keywords = list(source.topic_matched_keywords)
-        paragraph.topic_is_relevant = source.topic_is_relevant
 
 
 def annotate_section_statistics(document: ThesisDocument) -> None:
@@ -1125,24 +850,6 @@ def matches_topic_keyword(text: str, keyword: str) -> bool:
     subterms = [keyword[index : index + 3] for index in range(len(keyword) - 2)]
     hit_count = sum(subterm in text for subterm in subterms)
     return hit_count >= max(2, (len(subterms) * 2 + 2) // 3)
-
-
-def matches_report_standard_keyword(text: str, keyword: str) -> bool:
-    """Match report-standard keywords with a small local alias catalog."""
-
-    return any(
-        matches_topic_keyword(text, candidate)
-        for candidate in (keyword, *REPORT_STANDARD_KEYWORD_ALIASES.get(keyword, ()))
-    )
-
-
-def matches_report_standard(text: str, standard: str, keywords: list[str]) -> bool:
-    """Match one report standard using local evidence terms when configured."""
-
-    evidence_terms = REPORT_STANDARD_EVIDENCE_TERMS.get(standard)
-    if evidence_terms is not None:
-        return any(matches_topic_keyword(text, term) for term in evidence_terms)
-    return any(matches_report_standard_keyword(text, keyword) for keyword in keywords)
 
 
 def topic_keyword_weight(keyword: str) -> float:
