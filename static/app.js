@@ -646,6 +646,20 @@ function renderModelMeta(modelMeta, scoreSource, commentSource, roles) {
       modelMeta.available ? "is-ready" : "is-muted",
     ),
   );
+  // The server-side window is only observable for an already-loaded local
+  // model; when it is, show it, because a narrow window silently strips the
+  // system prompt from every prompt.
+  if (typeof modelMeta.context_window === "number") {
+    const adequate = modelMeta.context_window_adequate !== false;
+    node.appendChild(
+      buildMetaChip(
+        adequate
+          ? `窗口 ${modelMeta.context_window}`
+          : `窗口 ${modelMeta.context_window} 偏小`,
+        adequate ? "is-muted" : "is-fallback",
+      ),
+    );
+  }
   node.appendChild(
     buildMetaChip(formatScoreSource(scoreSource), "is-score"),
   );

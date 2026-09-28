@@ -36,9 +36,11 @@ uv sync
 默认走本地引擎，需先准备好本机推理服务（只做一次）：
 
 ```bash
-OLLAMA_CONTEXT_LENGTH=16384 ollama serve   # 另开一个终端保持运行
 ollama pull qwen3:8b
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve   # 另开一个终端保持运行
 ```
+
+> **注意**：若系统托盘的 Ollama 桌面应用（`ollama app.exe`）已在运行，它已占用 11434 端口，上面这条 `ollama serve` 会因端口冲突启动失败，而旧的默认窗口服务仍在响应，导致上下文窗口看似设置无效。请先从托盘退出桌面应用，再执行上述命令。完整机制见[本地引擎的运行前置](#本地引擎的运行前置)。
 
 命令行评审：
 
@@ -91,12 +93,12 @@ uv run thesisev examples/sample_thesis.md --preset thesis_tech --json
 
 推理引擎用 `--engine` 选择，默认 `local`：
 
-| 参数 | 默认值 | 说明 |
-|---|---|---|
-| `--engine` | `local` | `local` 走本机 Ollama，论文不出本机；`remote` 走 DeepSeek API |
-| `--provider` | 跟随引擎 | 显式指定模型提供方，优先级高于 `--engine`（引擎由提供方推导，故 `--provider deepseek` 与 `--engine remote` 等价） |
-| `--model` | 跟随提供方 | 显式模型名。`local` 默认 `qwen3:8b`，`remote` 默认 `deepseek-flash` |
-| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `400` |
+| 参数           | 默认值     | 说明                                                                                                              |
+| -------------- | ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--engine`     | `local`    | `local` 走本机 Ollama，论文不出本机；`remote` 走 DeepSeek API                                                     |
+| `--provider`   | 跟随引擎   | 显式指定模型提供方，优先级高于 `--engine`（引擎由提供方推导，故 `--provider deepseek` 与 `--engine remote` 等价） |
+| `--model`      | 跟随提供方 | 显式模型名。`local` 默认 `qwen3:8b`，`remote` 默认 `deepseek-flash`                                               |
+| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `400`                                                                |
 
 ```bash
 uv run thesisev examples/sample_thesis.md --engine remote --model deepseek-v4-pro
@@ -295,21 +297,24 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 
 引擎由模型提供方推导（见 `thesisev/llm.py` 的 `ENGINE_PROVIDERS`），两档共用同一条 LangChain 调用路径，切换只改变端点与请求体，不新增依赖。
 
-| | `local`（默认） | `remote` |
-|---|---|---|
-| 提供方 / 模型 | `ollama` / `qwen3:8b` | `deepseek` / `deepseek-flash` |
-| 凭据 | 不需要 | `DEEPSEEK_API_KEY` |
-| 端点 | `http://127.0.0.1:11434/v1` | `https://api.deepseek.com` |
-| 论文去向 | 不出本机 | 上传至第三方 |
-| 输出上限 | 1024 token | 400 token |
-| 分数可复现性 | 权重版本固定，长期可比 | 模型别名可被静默改指 |
+|               | `local`（默认）             | `remote`                      |
+| ------------- | --------------------------- | ----------------------------- |
+| 提供方 / 模型 | `ollama` / `qwen3:8b`       | `deepseek` / `deepseek-flash` |
+| 凭据          | 不需要                      | `DEEPSEEK_API_KEY`            |
+| 端点          | `http://127.0.0.1:11434/v1` | `https://api.deepseek.com`    |
+| 论文去向      | 不出本机                    | 上传至第三方                  |
+| 输出上限      | 1024 token                  | 400 token                     |
+| 分数可复现性  | 权重版本固定，长期可比      | 模型别名可被静默改指          |
 
 切换方式：CLI 用 `--engine remote`，API / Web UI 用 `engine` 字段，表单默认选中 `local`。
 
 ### 本地引擎的运行前置
 
 - 需先启动 Ollama 并拉取所选模型。评审前会探测 `/v1/models`：服务未启动或模型未拉取时，`metadata.model.availability` 记为 `runtime_unreachable`，`available` 为 `false`，整条链路立即降级为本地规则，不消耗退避重试。
-- **上下文窗口必须在服务端设置**。Ollama 的 OpenAI 兼容接口在解码时会丢弃请求体里的 `num_ctx`，因此无法按请求调整；而本机显存档位（< 24 GiB）对应的默认窗口偏小，prompt 超出时 Ollama 会**静默丢弃开头部分**（连同系统提示）。启动前设 `OLLAMA_CONTEXT_LENGTH=16384`。
+- **上下文窗口必须在服务端设置，且要设到 16384**。实测机制：Ollama 的 `/v1/chat/completions` 是原生处理器外套一层翻译中间件，请求体里的 `num_ctx`（无论放在顶层还是 `options` 内）在解码阶段即被丢弃，返回 200 但不生效；本机显存档位（< 24 GiB）对应默认窗口仅 **4096 token**，且 prompt 超限时 Ollama 从**开头**截断——最先丢掉的正是系统提示与 JSON 输出骨架，模型随后只能返回非 JSON 内容。按 `content_context` 上限（13,200 字符）构造的真实规模论文实测 prompt 为 **7,467 token**，加 1024 输出共需 **8,491**。
+  - 设置方式一（推荐）：以 `OLLAMA_CONTEXT_LENGTH=16384` 启动服务。该变量对服务端生效，实测窗口升至 16384、模型占用 7.00 GiB 全部驻留显存。
+  - 设置方式二：把窗口烘进模型本身（`ollama create qwen3-8b-16k` + Modelfile 写入 `PARAMETER num_ctx 16384`），再以 `--model qwen3-8b-16k` 调用。这是唯一能透过该路由生效的按模型设置。
+  - 实测对照（同一份 21,720 字符论文）：默认 4096 → **0/6** 评分项走 LLM，6 项全部降级为本地规则；16384 与 24576 → **6/6**，均零告警、结果一致，故取显存余量更大的 16384。
 - Qwen3 在 Ollama 中默认开启 thinking，本项目通过 `reasoning_effort = none` 显式关闭，否则推理内容会吃光 token 预算并返回空 `content`。
 
 ### 远程引擎

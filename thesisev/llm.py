@@ -143,6 +143,11 @@ class LocalRuntimeProbe:
     model_installed: bool | None
     models: tuple[str, ...]
     detail: str
+    #: Effective context window of the configured model when the server
+    #: already holds it in memory, otherwise ``None``.  Only Ollama exposes
+    #: this (via its native ``/api/ps``); other OpenAI-compatible servers
+    #: leave it unset.
+    context_length: int | None = None
 
 
 @dataclass(slots=True)
@@ -164,6 +169,12 @@ class ModelConfig:
     #: means the runtime was never probed.  ``False`` forces the deterministic
     #: degradation path so a stopped server costs no retry backoff.
     runtime_reachable: bool | None = None
+
+    #: Effective context window reported by the local server for an
+    #: already-loaded model.  ``None`` means it could not be observed, which
+    #: is not an error -- the window may simply be fine, or the server may not
+    #: be Ollama.
+    local_context_window: int | None = None
 
     @property
     def output_tokens(self) -> int:
@@ -253,6 +264,18 @@ class ModelConfig:
             return f"credential:{self.credential_source}"
         return "credential_missing"
 
+    def context_window_adequate(self) -> bool | None:
+        """Whether the observed local context window meets the floor.
+
+        ``None`` when the window was not observed -- which is not a failure,
+        only an absence of information.  The check lives here so the floor is
+        never duplicated in the frontend.
+        """
+
+        if self.local_context_window is None:
+            return None
+        return self.local_context_window >= MIN_RECOMMENDED_LOCAL_CONTEXT
+
     def to_metadata(self) -> dict[str, Any]:
         """Serialize model configuration for result metadata.
 
@@ -272,6 +295,8 @@ class ModelConfig:
             "credential_source": self.credential_source,
             "available": self.is_available(),
             "availability": self.availability(),
+            "context_window": self.local_context_window,
+            "context_window_adequate": self.context_window_adequate(),
         }
 
 
@@ -478,8 +503,22 @@ def probe_local_runtime(
 
     models = _extract_model_ids(payload)
     installed = _model_is_installed(config.model, models)
+    context_length = (
+        _probe_loaded_context(base_url, config.model, timeout=timeout)
+        if installed
+        else None
+    )
     if installed:
         detail = f"local inference server at {base_url} is ready with {config.model}"
+        narrow = (
+            context_length is not None
+            and context_length < MIN_RECOMMENDED_LOCAL_CONTEXT
+        )
+        if narrow:
+            detail += (
+                f", but its context window is {context_length} tokens "
+                f"(recommended: {MIN_RECOMMENDED_LOCAL_CONTEXT})"
+            )
     else:
         detail = (
             f"local inference server at {base_url} is running but {config.model} "
@@ -490,7 +529,52 @@ def probe_local_runtime(
         model_installed=installed,
         models=models,
         detail=detail,
+        context_length=context_length,
     )
+
+
+def _probe_loaded_context(
+    base_url: str, model: str, *, timeout: float = 2.0
+) -> int | None:
+    """Read the effective context window of an already-loaded model.
+
+    Ollama reports it through the native ``/api/ps`` endpoint; the
+    OpenAI-compatible ``/v1/models`` route does not expose it.  A missing
+    endpoint (any non-Ollama server) or an unloaded model yields ``None``
+    rather than an error, because the window is a quality hint, not a
+    hard precondition.
+    """
+
+    root = base_url.rstrip("/").removesuffix("/v1")
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"{root}/api/ps", timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError, OSError, ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    entries = payload.get("models")
+    if not isinstance(entries, list):
+        return None
+    windows: list[tuple[int, int]] = []
+    wanted_base = model.split(":", 1)[0]
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name") or entry.get("model")
+        window = entry.get("context_length")
+        if not isinstance(name, str) or not isinstance(window, int) or window <= 0:
+            continue
+        if name == model:
+            windows.append((2, window))
+        elif name.split(":", 1)[0] == wanted_base:
+            # A bare repository name matches any installed tag, same rule the
+            # installation check uses.
+            windows.append((1, window))
+    if not windows:
+        return None
+    return max(windows)[1]
 
 
 def _extract_model_ids(payload: Any) -> tuple[str, ...]:
@@ -532,6 +616,12 @@ def resolve_runtime(
     ``runtime_reachable`` to ``False``, which makes :meth:`is_available` false
     and sends the pipeline straight down its deterministic path instead of
     paying for connection-refused retries on every one of its calls.
+
+    A reachable server holding the model in a window narrower than
+    :data:`MIN_RECOMMENDED_LOCAL_CONTEXT` is *not* demoted -- it still
+    answers -- but it is reported, because Ollama truncates an overlong
+    prompt from the front, which drops the system prompt and the JSON
+    skeleton and makes every scoring call fail without an error of its own.
     """
 
     probe = probe_local_runtime(config, timeout=probe_timeout)
@@ -544,6 +634,18 @@ def resolve_runtime(
         config.runtime_reachable = False
         return config, probe.detail
     config.runtime_reachable = True
+    config.local_context_window = probe.context_length
+    if probe.context_length is not None and (
+        probe.context_length < MIN_RECOMMENDED_LOCAL_CONTEXT
+    ):
+        return config, (
+            f"{config.model} is loaded with a {probe.context_length}-token "
+            f"context window; {MIN_RECOMMENDED_LOCAL_CONTEXT} is recommended. "
+            "Ollama truncates an overlong prompt from the front, which drops "
+            "the system prompt and the JSON skeleton, so scoring calls fall "
+            f"back to local rules silently. Restart the server with "
+            f"{LOCAL_CONTEXT_ENV}={MIN_RECOMMENDED_LOCAL_CONTEXT}."
+        )
     return config, None
 
 
@@ -554,15 +656,20 @@ def local_context_hint(config: ModelConfig) -> str | None:
     ``num_ctx`` key, so the window can only be raised by the server.  Returning
     a hint rather than a warning keeps it informational: a small window
     degrades answer quality without failing the run.
+
+    When the probe already observed the window, this stays quiet --
+    :func:`resolve_runtime` has said something concrete, and repeating a
+    generic prerequisite on top of it would only add noise.
     """
 
-    if not config.is_local:
+    if not config.is_local or config.local_context_window is not None:
         return None
     return (
         f"本地引擎的上下文窗口需在服务端设置：启动 Ollama 前设 "
         f"{LOCAL_CONTEXT_ENV}={MIN_RECOMMENDED_LOCAL_CONTEXT}。"
         "OpenAI 兼容接口会丢弃请求体内的 num_ctx，"
-        "而本机显存档位对应的默认窗口偏小，超出时会静默丢弃 prompt 开头部分。"
+        "本机显存档位对应的默认窗口为 4096，超出时会从 prompt 开头截断，"
+        "丢弃系统提示与 JSON 骨架。"
     )
 
 
