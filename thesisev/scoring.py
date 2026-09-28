@@ -442,6 +442,12 @@ def build_score_prompt(
     rubric -- every other item then failed to parse and silently fell back to
     the local rules.  Pre-filling makes a lazy copy produce the correct
     identity, so only the judgement fields are left to the model.
+
+    The per-item scale is spelled out for the same reason.  The top-level field
+    is also called ``score``, and a bare "``score`` 为百分制总分" was read as a
+    statement about the per-item field too: models answered 60 / 78 / 80 for
+    items whose ``max_score`` was 10 or 5, every score clamped to full marks and
+    the report inflated to a near-perfect total.
     """
 
     rubric_summary = [
@@ -485,13 +491,17 @@ def build_score_prompt(
         "替换成该项的真实评分内容；这四个字段都必须写成具体的中文句子，"
         f'不得保留 "{PROMPT_PLACEHOLDER}" 这类占位符。\n'
         "要求：\n"
-        "1. score 为百分制总分，raw_score 为各项原始分总和，"
-        "raw_total 为各项满分总和。\n"
-        "2. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
-        "3. 评分必须参考评分标准，但分数由你综合判断。\n"
-        "4. 证据、扣分原因、建议都要简洁具体；"
+        "1. criteria 中每一项的 score 是该评分项的得分，必须落在 "
+        "[0, 该项 max_score] 区间内，不得写成百分制："
+        "例如 max_score 为 10 时 score 只能是 0 到 10 之间的数，"
+        "不得取 60、80 这类百分数。\n"
+        "2. raw_score 为各项 score 之和，raw_total 为各项 max_score 之和；"
+        "顶层的 score 才是百分制总分，等于 raw_score 除以 raw_total 再乘 100 取整。\n"
+        "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
+        "4. 评分必须参考评分标准，但分数由你综合判断。\n"
+        "5. 证据、扣分原因、建议都要简洁具体；"
         "任何低于满分的评分项，deductions 必须给出具体扣分理由，不能留空。\n"
-        "5. 只能依据 content_context 中的内容证据评分；"
+        "6. 只能依据 content_context 中的内容证据评分；"
         "不得推测或评价格式、标点和口语化表达。\n"
         f"内容证据：{json.dumps(payload, ensure_ascii=False)}"
     )

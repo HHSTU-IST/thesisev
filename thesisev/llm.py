@@ -23,6 +23,7 @@ dependency.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import tomllib
@@ -35,6 +36,8 @@ from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
 
 from thesisev.paths import config_dir
+
+logger = logging.getLogger(__name__)
 
 ENGINE_LOCAL = "local"
 ENGINE_REMOTE = "remote"
@@ -68,10 +71,15 @@ OLLAMA_PLACEHOLDER_API_KEY = "ollama"
 #: ``max_completion_tokens``, a name neither DeepSeek nor Ollama documents, so
 #: the limit has to be repeated in ``extra_body`` to reach the wire.
 #:
-#: The local engine gets a wider default because a rubric item's JSON carries
-#: prose ``evidence`` / ``deductions`` / ``suggestions``; the remote callers
-#: tune theirs through the CLI and the API.
-DEFAULT_MAX_TOKENS: dict[str, int] = {"ollama": 1024}
+#: The budget must clear the largest JSON this pipeline asks for.  Both prompts
+#: carry prose ``evidence`` / ``deductions`` / ``suggestions``: a 20-point rubric
+#: item measured ~700 output tokens, and the deep review asks for up to six
+#: findings.  A budget that is too small does not fail loudly -- the provider
+#: stops at ``finish_reason=length``, the JSON ends mid-string, and the caller
+#: silently degrades to the local rules, so the ``400`` default that used to sit
+#: here cost the score items *and* the whole deep review without a visible
+#: error.  Callers can still tighten it through the CLI and the API.
+DEFAULT_MAX_TOKENS: dict[str, int] = {"ollama": 1024, "deepseek": 2048}
 FALLBACK_MAX_TOKENS = 400
 
 #: DeepSeek retired the ``deepseek-chat`` / ``deepseek-reasoner`` aliases on
@@ -673,6 +681,26 @@ def local_context_hint(config: ModelConfig) -> str | None:
     )
 
 
+def warn_if_output_truncated(response: Any) -> bool:
+    """Warn when the provider stopped at the output budget, not at the end.
+
+    A truncated reply is the failure mode that hides best: the JSON simply ends
+    mid-string, so the parser raises and the caller degrades to the local rules
+    while the report still looks complete.  Lifting ``finish_reason`` into a log
+    line makes the cause visible instead of leaving it to be inferred from a
+    stray ``JSONDecodeError``.
+    """
+
+    metadata = getattr(response, "response_metadata", None) or {}
+    if metadata.get("finish_reason") != "length":
+        return False
+    logger.warning(
+        "llm response hit the output-token budget (finish_reason=length); "
+        "the JSON may be truncated -- raise max_tokens if parsing fails"
+    )
+    return True
+
+
 def invoke_chat_model_with_retry(
     model: Any,
     messages: Any,
@@ -690,11 +718,14 @@ def invoke_chat_model_with_retry(
     last_error: Exception | None = None
     for attempt in range(max(1, attempts)):
         try:
-            return model.invoke(messages)
+            response = model.invoke(messages)
         except Exception as exc:  # noqa: BLE001 - provider errors are heterogeneous
             last_error = exc
             if attempt + 1 < max(1, attempts):
                 time.sleep(base_delay * (2**attempt))
+            continue
+        warn_if_output_truncated(response)
+        return response
     if last_error is not None:
         raise last_error
     msg = "invoke_chat_model_with_retry called without a model"

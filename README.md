@@ -98,7 +98,7 @@ uv run thesisev examples/sample_thesis.md --preset thesis_tech --json
 | `--engine`     | `local`    | `local` 走本机 Ollama，论文不出本机；`remote` 走 DeepSeek API                                                     |
 | `--provider`   | 跟随引擎   | 显式指定模型提供方，优先级高于 `--engine`（引擎由提供方推导，故 `--provider deepseek` 与 `--engine remote` 等价） |
 | `--model`      | 跟随提供方 | 显式模型名。`local` 默认 `qwen3:8b`，`remote` 默认 `deepseek-flash`                                               |
-| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `400`                                                                |
+| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `2048`                                                                |
 
 ```bash
 uv run thesisev examples/sample_thesis.md --engine remote --model deepseek-v4-pro
@@ -303,7 +303,7 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 | 凭据          | 不需要                      | `DEEPSEEK_API_KEY`            |
 | 端点          | `http://127.0.0.1:11434/v1` | `https://api.deepseek.com`    |
 | 论文去向      | 不出本机                    | 上传至第三方                  |
-| 输出上限      | 1024 token                  | 400 token                     |
+| 输出上限      | 1024 token                  | 2048 token                    |
 | 分数可复现性  | 权重版本固定，长期可比      | 模型别名可被静默改指          |
 
 切换方式：CLI 用 `--engine remote`，API / Web UI 用 `engine` 字段，表单默认选中 `local`。
@@ -320,7 +320,8 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 ### 远程引擎
 
 - DeepSeek 现行模型 ID 为 `deepseek-flash` 与 `deepseek-v4-pro`，旧的 `deepseek-chat` / `deepseek-reasoner` 别名已于 2026-07-24 停用。
-- 配置 API Key：优先设置环境变量 `DEEPSEEK_API_KEY`；也可在 `config/provider_env.toml` 的 `api_key` 字段填入字面值（该文件在版本库跟踪范围内，不推荐）。两者都取不到时按未配置处理。
+- 配置 API Key：`DEEPSEEK_API_KEY` 环境变量是唯一推荐方式。`config/provider_env.toml` 受版本库跟踪，其中的 `api_key` 字面值字段只用于本地临时调试，一旦填入即进入 git 历史（20 位 `sk-` 开头字符串会被 GitHub 密钥扫描捕获），不要提交。注意 `api_key_env` 只放**变量名**，不能放密钥本身，否则解析为空、远程通路按未配置静默降级。
+- 输出上限必须容纳最长的 JSON：评分项要输出 `evidence` / `deductions` / `suggestions` 三条中文列表，深度复核要输出最多 6 条 findings，实测 20 分制评分项已超 400 token。上限过小不会报错——提供方以 `finish_reason=length` 中途停住，JSON 在字符串中间断开，解析抛错后调用方静默降级为本地规则，报告看起来仍然完整。默认值因此定在 2048，并在 `invoke_chat_model_with_retry` 中把 `finish_reason=length` 提升为告警日志。
 - DeepSeek 默认开启 thinking 模式，本项目在请求中显式关闭（`thinking.type = disabled`），以保证评分项返回严格 JSON。
 
 ### 其他
