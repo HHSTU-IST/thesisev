@@ -165,12 +165,6 @@ def read_docx_text_from_document(document: Any) -> str:
     return "\n\n".join(paragraphs)
 
 
-def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
-    """Extract a compact formatting snapshot from a docx file."""
-
-    return read_docx_format_snapshot_from_document(open_docx_document(path))
-
-
 def read_docx_format_snapshot_from_document(document: Any) -> dict[str, Any]:
     """Extract a compact formatting snapshot from a python-docx document."""
 
@@ -329,12 +323,6 @@ def iter_docx_nested_tables(table: Any):
             for nested_table in getattr(cell, "tables", []):
                 yield nested_table
                 yield from iter_docx_nested_tables(nested_table)
-
-
-def iter_docx_runs(paragraph: Any):
-    """Iterate runs from a paragraph."""
-
-    yield from getattr(paragraph, "runs", [])
 
 
 def normalize_docx_paragraph_text(text: str) -> str:
@@ -1072,12 +1060,6 @@ def split_paragraphs(text: str) -> list[str]:
     """Split text into non-empty paragraph strings."""
 
     return [paragraph.text for paragraph in build_paragraphs(text)]
-
-
-def split_sentences(text: str) -> list[str]:
-    """Split text into non-empty sentence strings."""
-
-    return flatten_sentence_text(build_paragraphs(text))
 
 
 def find_abstract(sections: list[Section], front_matter: str) -> str:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -32,7 +33,12 @@ from thesisev.analyzers import (
 )
 from thesisev.commentary import generate_comment
 from thesisev.deep_review import run_deep_review
-from thesisev.llm import ModelConfig, build_model_config
+from thesisev.llm import (
+    ENGINE_LOCAL,
+    ModelConfig,
+    build_model_config,
+    resolve_runtime,
+)
 from thesisev.models import EvaluationResult, Issue, ThesisDocument
 from thesisev.parser import load_document
 from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
@@ -51,6 +57,8 @@ from thesisev.scoring import (
     sum_format_rule_points,
 )
 from thesisev.scoring_format import extract_format_rules, normalize_format_spec_payload
+
+logger = logging.getLogger(__name__)
 
 
 class UploadRequestTooLarge(Exception):
@@ -127,15 +135,27 @@ class EvaluateRequest(BaseModel):
     path: str = Field(
         description="Local path to a md or docx thesis file under the project root."
     )
-    provider: str = Field(default="deepseek", description="LLM provider name.")
+    engine: str = Field(
+        default=ENGINE_LOCAL,
+        description=(
+            "Inference engine: 'local' keeps the document on this host, "
+            "'remote' sends it to the DeepSeek API."
+        ),
+    )
+    provider: str | None = Field(
+        default=None, description="LLM provider name, overriding the engine default."
+    )
     model: str | None = Field(
         default=None, description="Explicit model name for the selected provider."
     )
     temperature: float = Field(
         default=0.2, ge=0.0, le=2.0, description="LLM sampling temperature."
     )
-    max_tokens: int = Field(
-        default=400, ge=64, le=4000, description="Max output tokens for commentary."
+    max_tokens: int | None = Field(
+        default=None,
+        ge=64,
+        le=4000,
+        description="Max output tokens; omitted selects the provider default.",
     )
     preset: str = Field(
         default="thesis_tech",
@@ -181,10 +201,11 @@ app.add_middleware(
 
 EVALUATE_UPLOAD_FILE_DEFAULT = File(default=None)
 EVALUATE_UPLOAD_PRESET_DEFAULT = Form(default="thesis_tech")
-EVALUATE_UPLOAD_PROVIDER_DEFAULT = Form(default="deepseek")
+EVALUATE_UPLOAD_ENGINE_DEFAULT = Form(default=ENGINE_LOCAL)
+EVALUATE_UPLOAD_PROVIDER_DEFAULT = Form(default=None)
 EVALUATE_UPLOAD_MODEL_DEFAULT = Form(default=None)
 EVALUATE_UPLOAD_TEMPERATURE_DEFAULT = Form(default=0.2)
-EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=400)
+EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=None)
 
 PRESET_CONFIGS: dict[str, dict[str, str]] = {
     "thesis_tech": {
@@ -247,10 +268,11 @@ def run_evaluation_job(
     *,
     job_id: str,
     source: Path,
-    provider: str,
+    engine: str,
+    provider: str | None,
     model: str | None,
     temperature: float,
-    max_tokens: int,
+    max_tokens: int | None,
     rubric_filename: str,
     rubric_summary: dict[str, Any] | None,
     format_summary: dict[str, Any] | None,
@@ -260,15 +282,24 @@ def run_evaluation_job(
 
     The uploaded source file is kept until the worker finishes so the
     blocking parse step owns its lifecycle; it is cleaned up afterwards.
+    The runtime probe runs here rather than on the event loop, so a local
+    server that is slow to answer never delays the HTTP response.
     """
 
     try:
-        result = evaluate_document(
-            source,
+        model_config = build_model_config(
+            engine=engine,
             provider=provider,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
+        )
+        model_config, runtime_warning = resolve_runtime(model_config)
+        if runtime_warning:
+            logger.warning("evaluation job %s: %s", job_id, runtime_warning)
+        result = evaluate_document(
+            source,
+            model_config=model_config,
             rubric_filename=rubric_filename,
             rubric=rubric_summary,
             format_requirements=format_summary,
@@ -319,12 +350,19 @@ def evaluate(request: EvaluateRequest) -> ApiResponse:
         rubric_filename, format_filename = resolve_preset_files(request.preset)
         rubric_summary = load_builtin_rubric_summary(rubric_filename)
         format_summary = load_builtin_format_requirements_summary(format_filename)
-        result = evaluate_document(
-            source,
+        model_config = build_model_config(
+            engine=request.engine,
             provider=request.provider,
             model=request.model,
             temperature=request.temperature,
             max_tokens=request.max_tokens,
+        )
+        model_config, runtime_warning = resolve_runtime(model_config)
+        if runtime_warning:
+            logger.warning("evaluate request: %s", runtime_warning)
+        result = evaluate_document(
+            source,
+            model_config=model_config,
             rubric_filename=rubric_filename,
             rubric=rubric_summary,
             format_requirements=format_summary,
@@ -358,10 +396,11 @@ def structure(request: StructureRequest) -> ApiResponse:
 async def evaluate_upload(
     file: UploadFile | None = EVALUATE_UPLOAD_FILE_DEFAULT,
     preset: str = EVALUATE_UPLOAD_PRESET_DEFAULT,
-    provider: str = EVALUATE_UPLOAD_PROVIDER_DEFAULT,
+    engine: str = EVALUATE_UPLOAD_ENGINE_DEFAULT,
+    provider: str | None = EVALUATE_UPLOAD_PROVIDER_DEFAULT,
     model: str | None = EVALUATE_UPLOAD_MODEL_DEFAULT,
     temperature: float = EVALUATE_UPLOAD_TEMPERATURE_DEFAULT,
-    max_tokens: int = EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT,
+    max_tokens: int | None = EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT,
 ) -> ApiResponse:
     """Submit an uploaded thesis file for background evaluation.
 
@@ -385,6 +424,7 @@ async def evaluate_upload(
         run_evaluation_job,
         job_id=job["job_id"],
         source=source,
+        engine=engine,
         provider=provider,
         model=model,
         temperature=temperature,
@@ -612,17 +652,24 @@ def run_api() -> None:
 def evaluate_document(
     path: str | Path,
     *,
+    engine: str | None = None,
     provider: str | None = None,
     model: str | None = None,
     temperature: float = 0.2,
-    max_tokens: int = 400,
+    max_tokens: int | None = None,
     timeout: int = 60,
     model_config: ModelConfig | None = None,
     rubric_filename: str = DEFAULT_THESIS_TECH_RUBRIC,
     rubric: dict[str, Any] | None = None,
     format_requirements: dict[str, Any] | None = None,
 ) -> EvaluationResult:
-    """Evaluate a thesis document from a local path."""
+    """Evaluate a thesis document from a local path.
+
+    ``model_config`` short-circuits the individual knobs.  When it is omitted,
+    a config is built from ``engine``/``provider``; callers that intend to run
+    a local engine should probe the runtime first (see
+    :func:`thesisev.llm.resolve_runtime`) so a stopped server degrades at once.
+    """
 
     document = load_document(path)
     topic_analysis = annotate_topic_relevance(document)
@@ -642,6 +689,7 @@ def evaluate_document(
         technology_details=technology_details,
     )
     runtime_model_config = model_config or build_model_config(
+        engine=engine,
         provider=provider,
         model=model,
         temperature=temperature,
@@ -768,9 +816,21 @@ def read_history_unlocked() -> list[dict[str, Any]]:
     return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
 
 
+#: Metadata keys that must never reach disk.  ``api_key`` was persisted for
+#: sixteen reviews before the credential handling was corrected, so the write
+#: path filters defensively rather than trusting every producer of ``model``
+#: metadata to keep omitting it.
+FORBIDDEN_METADATA_KEYS = frozenset({"api_key"})
+
+
 def build_history_entry(result: EvaluationResult) -> dict[str, Any]:
     """Build a compact serialized history entry."""
 
+    model_metadata = {
+        key: value
+        for key, value in (result.metadata.get("model") or {}).items()
+        if key not in FORBIDDEN_METADATA_KEYS
+    }
     return {
         "id": uuid.uuid4().hex,
         "created_at": datetime.now(tz=UTC).isoformat(timespec="seconds"),
@@ -781,5 +841,5 @@ def build_history_entry(result: EvaluationResult) -> dict[str, Any]:
         "issue_count": len(result.issues),
         "topic_relevance_ratio": result.topic_relevance_ratio,
         "technology_stack": result.technology_stack,
-        "model": result.metadata.get("model", {}),
+        "model": model_metadata,
     }

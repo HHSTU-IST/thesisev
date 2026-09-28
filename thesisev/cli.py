@@ -9,6 +9,13 @@ from pathlib import Path
 
 from thesisev.analyzers import split_technology_stack
 from thesisev.api import evaluate_document, resolve_preset_files, structure_document
+from thesisev.llm import (
+    ENGINE_LOCAL,
+    ENGINE_REMOTE,
+    build_model_config,
+    local_context_hint,
+    resolve_runtime,
+)
 from thesisev.models import (
     EvaluationResult,
     Section,
@@ -39,9 +46,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print machine-readable JSON instead of the human-readable output.",
     )
     parser.add_argument(
+        "--engine",
+        choices=(ENGINE_LOCAL, ENGINE_REMOTE),
+        default=ENGINE_LOCAL,
+        help=(
+            "Inference engine. 'local' (default) uses the on-host Ollama server "
+            "so the thesis never leaves this machine; 'remote' calls the "
+            "DeepSeek API and requires DEEPSEEK_API_KEY."
+        ),
+    )
+    parser.add_argument(
         "--provider",
-        default="deepseek",
-        help="LLM provider for comment generation, default is deepseek.",
+        default=None,
+        help=(
+            "LLM provider, overriding --engine. Defaults to the provider that "
+            "backs the selected engine."
+        ),
     )
     parser.add_argument(
         "--model",
@@ -57,8 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=400,
-        help="Maximum output tokens for generated commentary.",
+        default=None,
+        help=(
+            "Maximum output tokens for generated commentary. "
+            "If omitted, the provider's own default is used."
+        ),
     )
     parser.add_argument(
         "--preset",
@@ -88,17 +111,27 @@ def main() -> int:
         return 0
 
     rubric_filename, _format_filename = resolve_preset_files(args.preset)
-    result = evaluate_document(
-        source,
+    model_config = build_model_config(
+        engine=args.engine,
         provider=args.provider,
         model=args.model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+    )
+    model_config, runtime_warning = resolve_runtime(model_config)
+    if runtime_warning:
+        print(f"warning: {runtime_warning}", file=sys.stderr)
+    result = evaluate_document(
+        source,
+        model_config=model_config,
         rubric_filename=rubric_filename,
     )
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     else:
+        context_hint = local_context_hint(model_config)
+        if context_hint:
+            print(f"note: {context_hint}", file=sys.stderr)
         print_report(result)
     return 0
 
@@ -109,6 +142,16 @@ def print_report(result: EvaluationResult) -> None:
     print(f"Title: {result.document.title}")
     print(f"Source: {result.document.source_path}")
     print(f"Type: {result.document.source_type}")
+    model_meta = result.metadata.get("model", {})
+    engine_label = "本地" if model_meta.get("engine") == ENGINE_LOCAL else "远程"
+    print(
+        f"Engine: {engine_label} ({model_meta.get('provider', '-')}"
+        f"/{model_meta.get('model', '-')})"
+        f" available={model_meta.get('available', False)}"
+        f" ({model_meta.get('availability', '-')})"
+    )
+    print(f"Score Source: {result.metadata.get('score_source', 'local')}")
+    print(f"Comment Source: {result.metadata.get('comment_source', 'fallback')}")
     print()
     print("Statistics:")
     for item in result.statistics:

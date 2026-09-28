@@ -1,7 +1,15 @@
 const providerDefaults = {
-  deepseek: "deepseek-chat",
+  ollama: "qwen3:8b",
+  deepseek: "deepseek-flash",
   openai: "gpt-4o-mini",
   anthropic: "claude-3-5-haiku-latest"
+};
+
+// The engine is derived from the provider on the server; these are only the
+// defaults the form shows before the user narrows the choice down.
+const engineDefaults = {
+  local: { model: "qwen3:8b" },
+  remote: { model: "deepseek-flash" }
 };
 
 const state = {
@@ -13,6 +21,7 @@ const state = {
 };
 
 const form = document.getElementById("evaluate-form");
+const engineInput = document.getElementById("engine");
 const providerInput = document.getElementById("provider");
 const modelInput = document.getElementById("model");
 const presetInput = document.getElementById("preset");
@@ -22,17 +31,44 @@ const statusNode = document.getElementById("status");
 const resultsNode = document.getElementById("results");
 const exportMdButton = document.getElementById("export-md");
 const refreshHistoryButton = document.getElementById("refresh-history");
-const reuseHintNode = document.getElementById("reuse-hint");
+const engineHintNode = document.getElementById("engine-hint");
+
+function defaultModelForSelection() {
+  const byProvider = providerDefaults[providerInput.value];
+  if (byProvider) {
+    return byProvider;
+  }
+  return engineDefaults[engineInput.value]?.model || "";
+}
+
+engineInput.addEventListener("change", () => {
+  providerInput.value = "";
+  modelInput.value = defaultModelForSelection();
+  syncEngineHint();
+});
 
 providerInput.addEventListener("change", () => {
-  modelInput.value = providerDefaults[providerInput.value] || "";
+  modelInput.value = defaultModelForSelection();
+  syncEngineHint();
 });
+
+function syncEngineHint() {
+  const isLocal = providerInput.value
+    ? providerInput.value === "ollama"
+    : engineInput.value === "local";
+  // A local engine cannot set its context window through the OpenAI-compatible
+  // route, so the server-side prerequisite is stated next to the selector.
+  engineHintNode.textContent = isLocal
+    ? "本地引擎：论文不出本机，分数可复现。需先启动 Ollama 并拉取所选模型，建议设置 OLLAMA_CONTEXT_LENGTH=16384。"
+    : "远程引擎：论文正文会上传给模型服务方，请确认已获得授权。需先配置 DEEPSEEK_API_KEY。";
+}
 
 exportMdButton.addEventListener("click", () => exportResult("md"));
 refreshHistoryButton.addEventListener("click", () => {
   void loadHistory();
 });
 
+syncEngineHint();
 void loadHistory();
 
 form.addEventListener("submit", async (event) => {
@@ -108,10 +144,20 @@ function resetRenderedResults() {
 async function submitEvaluation() {
   const formData = new FormData();
   formData.append("preset", presetInput.value);
-  formData.append("provider", providerInput.value);
-  formData.append("model", modelInput.value);
+  formData.append("engine", engineInput.value);
+  // Empty values mean "follow the engine" on the server, so they are omitted
+  // rather than sent as blank fields.
+  if (providerInput.value) {
+    formData.append("provider", providerInput.value);
+  }
+  if (modelInput.value) {
+    formData.append("model", modelInput.value);
+  }
   formData.append("temperature", document.getElementById("temperature").value);
-  formData.append("max_tokens", document.getElementById("max_tokens").value);
+  const maxTokens = document.getElementById("max_tokens").value;
+  if (maxTokens) {
+    formData.append("max_tokens", maxTokens);
+  }
 
   const file = fileInput.files[0];
   if (!file) {
@@ -586,14 +632,17 @@ function renderModelMeta(modelMeta, scoreSource, commentSource, roles) {
   const node = document.getElementById("model-meta");
   node.replaceChildren();
 
+  const engineLabel = modelMeta.engine === "local" ? "本地" : "远程";
   node.appendChild(
     buildMetaChip(
-      `模型 ${modelMeta.provider || "-"} / ${modelMeta.model || "-"}`,
+      `引擎 ${engineLabel} · ${modelMeta.provider || "-"} / ${modelMeta.model || "-"}`,
     ),
   );
   node.appendChild(
     buildMetaChip(
-      `Key ${modelMeta.available ? "可用" : "不可用"}`,
+      modelMeta.available
+        ? `可用(${modelMeta.availability || "ok"})`
+        : `不可用(${modelMeta.availability || "unknown"})`,
       modelMeta.available ? "is-ready" : "is-muted",
     ),
   );

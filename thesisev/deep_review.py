@@ -199,22 +199,6 @@ def to_deep_review_issue(*, document: ThesisDocument, finding: dict[str, Any]) -
     )
 
 
-def merge_deep_review_issues(
-    existing: list[Issue], deep_issues: list[Issue]
-) -> list[Issue]:
-    """Append deep-review issues, dropping exact duplicates by message."""
-
-    seen = {(issue.category, issue.message) for issue in existing}
-    merged = list(existing)
-    for issue in deep_issues:
-        key = (issue.category, issue.message)
-        if key in seen:
-            continue
-        seen.add(key)
-        merged.append(issue)
-    return merged
-
-
 def _locate_section(document: ThesisDocument, label: str) -> Any | None:
     """Find the best-matching section for a human-written label."""
 

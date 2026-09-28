@@ -33,8 +33,18 @@
         </label>
 
         <label class="field">
+          <span>推理引擎</span>
+          <select id="engine" name="engine">
+            <option value="local" selected>local（本地 Ollama，论文不出本机）</option>
+            <option value="remote">remote（远程 DeepSeek API）</option>
+          </select>
+        </label>
+
+        <label class="field">
           <span>模型提供方</span>
           <select id="provider" name="provider">
+            <option value="" selected>跟随引擎</option>
+            <option value="ollama">ollama</option>
             <option value="deepseek">deepseek</option>
             <option value="openai">openai</option>
             <option value="anthropic">anthropic</option>
@@ -43,7 +53,7 @@
 
         <label class="field">
           <span>模型名称</span>
-          <input id="model" name="model" type="text" value="deepseek-chat" placeholder="deepseek-chat" />
+          <input id="model" name="model" type="text" value="qwen3:8b" placeholder="qwen3:8b" />
         </label>
 
         <label class="field">
@@ -53,12 +63,17 @@
 
         <label class="field">
           <span>Max Tokens</span>
-          <input id="max_tokens" name="max_tokens" type="number" min="64" max="4000" step="1" value="400" />
+          <input id="max_tokens" name="max_tokens" type="number" min="64" max="4000" step="1" placeholder="留空按引擎默认" />
         </label>
 
         <div class="actions field-span-2">
           <button id="submit-button" type="submit">开始评价</button>
           <p id="status" class="status">等待输入</p>
+        </div>
+
+        <div class="field field-span-2">
+          <span>引擎说明</span>
+          <p id="engine-hint" class="status">本地引擎：论文不出本机，分数可复现。需先启动 Ollama 并拉取所选模型，建议设置 OLLAMA_CONTEXT_LENGTH=16384。</p>
         </div>
 
         <div class="field field-span-2">

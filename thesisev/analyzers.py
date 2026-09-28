@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
@@ -193,12 +193,6 @@ def collect_topic_paragraphs(document: ThesisDocument) -> list[Paragraph]:
     ]
 
 
-def detect_issues(document: ThesisDocument) -> list[Issue]:
-    """Detect punctuation and colloquial writing issues."""
-
-    return detect_issue_groups(document).all_issues
-
-
 def detect_issue_groups(document: ThesisDocument) -> LocalIssueGroups:
     """Detect local issues without mixing format and writing concerns."""
 
@@ -306,22 +300,6 @@ def detect_colloquial_issues(document: ThesisDocument) -> list[Issue]:
                         )
                     )
     return deduplicate_issues(issues)
-
-
-def calculate_score(issues: list[Issue], section_count: int) -> int:
-    """Create a rough score from detected issues and document completeness."""
-
-    score = 90
-    for issue in issues:
-        if issue.severity == "medium":
-            score -= 4
-        elif issue.severity == "low":
-            score -= 2
-        else:
-            score -= 6
-    if section_count <= 1:
-        score -= 8
-    return max(60, min(98, score))
 
 
 class TopicAnalysis(TypedDict, total=False):
@@ -472,17 +450,6 @@ def count_section_subtree_topic_relevant_words(section: Section) -> int:
     )
 
 
-def group_technology_stack(
-    technology_details: list[TechnologyStackItem],
-) -> dict[str, list[str]]:
-    """Group extracted technologies by category."""
-
-    grouped: dict[str, list[str]] = defaultdict(list)
-    for item in technology_details:
-        grouped[item.category].append(item.name)
-    return dict(sorted(grouped.items()))
-
-
 def split_technology_stack(
     technology_details: list[TechnologyStackItem],
 ) -> dict[str, list[str]]:
@@ -514,35 +481,6 @@ def split_technology_stack(
         elif item.category in {"hardware", "device"}:
             grouped["hardware_technology_stack"].append(item.name)
     return grouped
-
-
-def tokenize(text: str) -> list[str]:
-    """Tokenize mixed Chinese and Latin text with light filtering."""
-
-    chinese_terms = re.findall(r"[\u4e00-\u9fff]{2,}", text)
-    latin_terms = re.findall(r"[A-Za-z][A-Za-z0-9+\-]{1,}", text)
-    tokens = chinese_terms + latin_terms
-    return [token for token in tokens if len(token.strip()) >= 2]
-
-
-def extract_compact_terms(text: str) -> list[str]:
-    """Extract shorter, more stable terms from mixed Chinese and Latin text."""
-
-    normalized = re.sub(r"[，。！？；：,.!?;:()\[\]（）【】\n\r\t]+", " ", text)
-    segments = [segment.strip() for segment in normalized.split() if segment.strip()]
-    tokens: list[str] = []
-    for segment in segments:
-        tokens.extend(
-            re.findall(r"[A-Za-z][A-Za-z0-9+\-]{1,}|[\u4e00-\u9fff]{2,6}", segment)
-        )
-    return [
-        token
-        for token in tokens
-        if token not in STOPWORDS
-        and token not in GENERIC_ANALYSIS_TERMS
-        and token not in SECTION_HEADING_TERMS
-        and is_topic_keyword_candidate(token)
-    ]
 
 
 def extract_tiktoken_keywords(text: str, top_k: int) -> list[str]:

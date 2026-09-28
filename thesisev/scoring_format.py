@@ -110,38 +110,6 @@ def score_format_compliance(
     return criterion
 
 
-def summarize_format_spec(
-    format_spec: dict[str, Any], *, source_name: str
-) -> dict[str, Any]:
-    """Convert the bundled format spec into UI-friendly summary data."""
-
-    rules = extract_format_rules(format_spec)
-    sections = format_spec.get("sections", [])
-    section_summary = [
-        {
-            "label": str(section.get("name") or section.get("id") or "").strip(),
-            "weight": parse_float_value(section.get("weight", 0)),
-            "rule_count": len(section.get("rules", []))
-            if isinstance(section, dict)
-            else 0,
-        }
-        for section in sections
-        if isinstance(section, dict)
-    ]
-    return {
-        "source_name": source_name,
-        "item_count": len(rules),
-        "items": [
-            {
-                "label": f"{rule['section']} / {rule['label']}",
-                "value": format_expected_value(get_rule_expected(rule)) or rule["id"],
-            }
-            for rule in rules
-        ],
-        "sections": section_summary,
-    }
-
-
 def score_format_rules(
     *,
     document: ThesisDocument,
@@ -238,16 +206,6 @@ def score_format_rules(
         "deductions": deduplicate_preserving_order(deductions),
         "suggestions": deduplicate_preserving_order(suggestions),
     }
-
-
-def build_format_suggestion(rule: dict[str, Any]) -> str:
-    """Build a short suggestion for a failed format rule."""
-
-    label = str(rule.get("label", "")).strip() or str(rule.get("id", "")).strip()
-    expected = format_expected_value(get_rule_expected(rule))
-    if expected:
-        return f"对照规范检查{label}：{expected}"
-    return f"对照规范检查{label}"
 
 
 def format_expected_value(value: Any) -> str:

@@ -42,7 +42,7 @@ include = [
 ]
 
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 line-length = 88
 
 [tool.ruff.format]
@@ -111,6 +111,10 @@ exclude = [
   "build",
   "dist",
 ]
+# `tests/` is in .gitignore, and ty honours ignore files by default — which
+# would silently drop it from the `include` above. Opt out so the declared
+# source set is what actually gets checked.
+respect-ignore-files = false
 
 [tool.ty.terminal]
 output-format = "full"
