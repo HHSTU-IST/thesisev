@@ -22,7 +22,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="thesisev",
-        description="Analyze a thesis file and produce a structure or evaluation report.",
+        description=(
+            "Analyze a thesis file and produce a structure or evaluation report."
+        ),
     )
     parser.add_argument("path", help="Path to a md or docx thesis file.")
     parser.add_argument(
@@ -127,12 +129,10 @@ def print_report(result: EvaluationResult) -> None:
     print("Content Evaluation:")
     print(result.comment)
     print("Comment Checks:")
-    print(
-        f"- keyword_coverage: {'ok' if result.comment_checks.get('passes_keyword_coverage') else 'needs review'}"
-    )
-    print(
-        f"- title_repetition: {'ok' if not result.comment_checks.get('repeats_title') else 'needs review'}"
-    )
+    keyword_coverage = result.comment_checks.get("passes_keyword_coverage")
+    print(f"- keyword_coverage: {'ok' if keyword_coverage else 'needs review'}")
+    repeats_title = result.comment_checks.get("repeats_title")
+    print(f"- title_repetition: {'ok' if not repeats_title else 'needs review'}")
     print()
     print("Format Issues:")
     if not result.issues:
@@ -141,7 +141,8 @@ def print_report(result: EvaluationResult) -> None:
     for issue in result.issues:
         print(
             f"- [{issue.category}] {issue.section_identifier} {issue.section_title} "
-            f"(P{issue.paragraph_index}, S{issue.sentence_index}, rule={issue.rule_id}): "
+            f"(P{issue.paragraph_index}, S{issue.sentence_index}, "
+            f"rule={issue.rule_id}): "
             f"{issue.message}\n"
             f"  Matched: {issue.matched_text}\n"
             f"  Suggestion: {issue.suggestion}\n"
@@ -173,9 +174,8 @@ def print_structure(document: ThesisDocument) -> None:
         relevant_paragraphs = sum(
             paragraph.topic_is_relevant for paragraph in document.paragraphs
         )
-        print(
-            f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{len(document.paragraphs)}"
-        )
+        total_paragraphs = len(document.paragraphs)
+        print(f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{total_paragraphs}")
     print()
     if document.front_matter:
         print("Front Matter:")

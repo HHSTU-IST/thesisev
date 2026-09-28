@@ -68,7 +68,7 @@ def run_deep_review(
         )
         payload = parse_deep_review_json(response)
         findings = normalize_deep_review_findings(payload)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - deep review is optional, degrade to []
         logger.warning("deep review skipped after LLM failure: %s", exc)
         return []
     deep_issues = [
@@ -119,7 +119,8 @@ def build_deep_review_prompt(document: ThesisDocument) -> str:
         "要求：\n"
         '1. type 只能是 "logic" 或 "tone"：'
         "logic 针对前后数据/结论矛盾、论证链缺失、结论无实验支撑、章节衔接断裂；"
-        "tone 针对口语化或主观化表述（如程度词滥用、随意连接词）及其上下文是否确实不妥。\n"
+        "tone 针对口语化或主观化表述（如程度词滥用、随意连接词）"
+        "及其上下文是否确实不妥。\n"
         '2. severity 只能是 "low" / "medium" / "high"。\n'
         "3. message 必须能对应到正文证据，空泛的套话不要列；"
         "每类最多 3 条，没有则返回空数组。\n"
@@ -140,7 +141,7 @@ def parse_deep_review_json(response: Any) -> dict[str, Any]:
         raise ValueError("deep review response contains no JSON object")
     payload = json.loads(text[start : end + 1])
     if not isinstance(payload, dict):
-        raise ValueError("deep review payload must be an object")
+        raise TypeError("deep review payload must be an object")
     return payload
 
 

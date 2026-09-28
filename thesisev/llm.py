@@ -162,7 +162,7 @@ def invoke_chat_model_with_retry(
     for attempt in range(max(1, attempts)):
         try:
             return model.invoke(messages)
-        except Exception as exc:  # provider errors are heterogeneous
+        except Exception as exc:  # noqa: BLE001 - provider errors are heterogeneous
             last_error = exc
             if attempt + 1 < max(1, attempts):
                 time.sleep(base_delay * (2**attempt))

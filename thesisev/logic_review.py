@@ -84,26 +84,24 @@ def _detect_conclusion_without_evidence(
     if evidence_sections:
         return []
 
-    issues: list[Issue] = []
-    for section in conclusion_sections[:1]:
-        issues.append(
-            _build_logic_issue(
-                section=section,
-                rule_id="conclusion_without_evidence",
-                severity="medium",
-                message=(
-                    f"章节「{section.title}」给出结论性表述，"
-                    "但全文未找到实验、测试、验证或结果分析类章节作为支撑依据。"
-                ),
-                suggestion=(
-                    "建议补充实验/测试/仿真与结果分析章节，"
-                    "或在结论中说明依据来源，避免结论缺乏证据链。"
-                ),
-                matched_text=section.title,
-                excerpt=_section_excerpt(section),
-            )
+    return [
+        _build_logic_issue(
+            section=section,
+            rule_id="conclusion_without_evidence",
+            severity="medium",
+            message=(
+                f"章节「{section.title}」给出结论性表述，"
+                "但全文未找到实验、测试、验证或结果分析类章节作为支撑依据。"
+            ),
+            suggestion=(
+                "建议补充实验/测试/仿真与结果分析章节，"
+                "或在结论中说明依据来源，避免结论缺乏证据链。"
+            ),
+            matched_text=section.title,
+            excerpt=_section_excerpt(section),
         )
-    return issues
+        for section in conclusion_sections[:1]
+    ]
 
 
 def _detect_conflicting_metric_claims(

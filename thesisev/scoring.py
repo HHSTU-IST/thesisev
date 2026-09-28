@@ -177,7 +177,7 @@ def score_rubric_items(
                         model_config=model_config,
                     )
                 )
-            except Exception as exc:  # degrade one item, never fail the review
+            except Exception as exc:  # noqa: BLE001 - degrade one item, never fail the review
                 logger.warning(
                     "llm scoring failed for %s (rubric=%s); falling back to local: %s",
                     item.name,
@@ -448,7 +448,8 @@ def build_score_prompt(
         "}\n"
         "要求：\n"
         "1. criteria 必须覆盖 rubric 中的全部项目。\n"
-        "2. score 为百分制总分，raw_score 为各项原始分总和，raw_total 为各项满分总和。\n"
+        "2. score 为百分制总分，raw_score 为各项原始分总和，"
+        "raw_total 为各项满分总和。\n"
         "3. 评分标准和评价方法必须来自 rubric_source 对应的配置文件。\n"
         "4. 评分必须参考评分标准，但分数由你综合判断。\n"
         "5. 证据、扣分原因、建议都要简洁具体；"
@@ -484,12 +485,12 @@ def normalize_llm_score_criteria(
     item_by_key = {item.name: item.name for item in rubric_items}
     criteria_payload = payload.get("criteria", [])
     if not isinstance(criteria_payload, list):
-        raise ValueError("llm score payload criteria must be a list")
+        raise TypeError("llm score payload criteria must be a list")
 
     criteria: list[ScoreCriterion] = []
     for entry in criteria_payload:
         if not isinstance(entry, dict):
-            raise ValueError("llm score payload criteria entry must be an object")
+            raise TypeError("llm score payload criteria entry must be an object")
         name = str(entry.get("name") or entry.get("key") or "").strip()
         if name not in rubric_by_name:
             raise ValueError(f"unknown rubric criterion: {name}")
@@ -499,15 +500,16 @@ def normalize_llm_score_criteria(
         evidence = parse_string_list(entry.get("evidence", []))
         if clamped_score != round(raw_score, 2):
             logger.warning(
-                "llm returned out-of-range score for %s: %.2f not in [0, %s]; clamped to %.2f",
+                "llm returned out-of-range score for %s: %.2f not in [0, %s]; "
+                "clamped to %.2f",
                 rubric_item.name,
                 raw_score,
                 rubric_item.max_score,
                 clamped_score,
             )
             evidence.append(
-                f"LLM 返回分数 {round(raw_score, 2)} 超出 [0, {rubric_item.max_score}]，"
-                f"已修正为 {clamped_score}"
+                f"LLM 返回分数 {round(raw_score, 2)} 超出 "
+                f"[0, {rubric_item.max_score}]，已修正为 {clamped_score}"
             )
         score = clamped_score
         deductions = parse_string_list(entry.get("deductions", []))
@@ -551,7 +553,10 @@ def validate_llm_deductions(
     """Require LLM scoring to explain every non-full score."""
 
     if score < max_score and not deductions:
-        msg = f"llm score criterion {criterion_name} is below max but deductions are empty"
+        msg = (
+            f"llm score criterion {criterion_name} is below max "
+            "but deductions are empty"
+        )
         raise ValueError(msg)
 
 

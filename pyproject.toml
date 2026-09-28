@@ -42,8 +42,6 @@ include = [
 ]
 
 [tool.ruff]
-fix = true
-fix-only = true
 target-version = "py313"
 line-length = 88
 

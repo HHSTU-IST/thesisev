@@ -36,7 +36,7 @@ def extract_format_rules(format_spec: dict[str, Any]) -> list[dict[str, Any]]:
 
     sections = format_spec.get("sections", [])
     if not isinstance(sections, list):
-        raise ValueError("format rubric sections must be a list")
+        raise TypeError("format rubric sections must be a list")
 
     rules: list[dict[str, Any]] = []
     for section in sections:
@@ -181,7 +181,8 @@ def score_format_rules(
         elif signal_type == "text_contains_any":
             terms = normalize_string_list(signal.get("terms", []))
             matched_terms = [term for term in terms if term in document.cleaned_text]
-            rule_evidence = f"{rule['label']}: {'，'.join(matched_terms) if matched_terms else '未命中'}"
+            matched_display = "，".join(matched_terms) if matched_terms else "未命中"
+            rule_evidence = f"{rule['label']}: {matched_display}"
             matched = not matched_terms
         elif signal_type == "issue_category":
             categories = normalize_string_list(signal.get("categories", []))
@@ -845,7 +846,7 @@ def parse_float_value(value: Any) -> float:
 
     if isinstance(value, bool) or not isinstance(value, int | float):
         msg = "numeric format rubric value required"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return float(value)
 
 

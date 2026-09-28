@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict
 
 import tiktoken
 
@@ -43,6 +43,13 @@ PUNCTUATION_CHINESE = load_json_resource("punctuation_chinese.json")
 PUNCTUATION_ENGLISH = load_json_resource("punctuation_english.json")
 PUNCTUATION_REPEATED = load_json_resource("punctuation_repeated.json")
 REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
+# Narrative particles trimmed from both ends of a fragment. They are matched
+# character by character, so a regex character class states the intent that a
+# multi-character `str.strip` argument would obscure.
+EDGE_PARTICLE_CHARS = "的与及和并且或者以及在对将把为是中上下"
+EDGE_PARTICLES_PATTERN = re.compile(
+    rf"\A[{EDGE_PARTICLE_CHARS}]+|[{EDGE_PARTICLE_CHARS}]+\Z"
+)
 TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
 
 
@@ -608,10 +615,8 @@ def extract_phrase_candidates(text: str) -> list[str]:
     ]
     candidates: list[str] = []
     for segment in segments:
-        for term in extract_latin_terms(segment):
-            candidates.append(term)
-        for phrase in extract_chinese_phrases(segment):
-            candidates.append(phrase)
+        candidates.extend(extract_latin_terms(segment))
+        candidates.extend(extract_chinese_phrases(segment))
     return normalize_topic_terms(candidates)
 
 
@@ -659,7 +664,7 @@ def normalize_domain_phrase(phrase: str) -> str:
     compact = phrase.strip()
     for target in DOMAIN_KEY_PHRASES:
         if target in compact:
-            return cast(str, target)
+            return target
     if compact.endswith("和句子") and "段落" in compact:
         return "句子识别"
     if compact.startswith("识别") and len(compact) <= 6:
@@ -670,7 +675,7 @@ def normalize_domain_phrase(phrase: str) -> str:
         return compact
     if compact.startswith("形成") and "数据结构" in compact:
         return "数据结构"
-    compact = compact.strip("的与及和并且或者以及在对将把为是中上下")
+    compact = EDGE_PARTICLES_PATTERN.sub("", compact)
     if not compact:
         return ""
     if len(compact) > 6 and not re.search(r"[A-Za-z0-9]", compact):

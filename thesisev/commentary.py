@@ -96,7 +96,7 @@ def generate_comment_with_llm(
                 HumanMessage(content=prompt),
             ],
         )
-    except Exception:
+    except Exception:  # noqa: BLE001 - any LLM failure falls back to the template
         return fallback, "fallback"
 
     content = extract_response_text(response).strip()

@@ -96,7 +96,7 @@ def parse_score_value(value: Any) -> float:
 
     if isinstance(value, bool) or not isinstance(value, int | float):
         msg = "rubric score must be numeric"
-        raise ValueError(msg)
+        raise TypeError(msg)
     return float(value)
 
 
@@ -152,11 +152,11 @@ def parse_rubric_score(score: Any) -> float:
 
     if isinstance(score, bool):
         msg = "rubric score must be numeric"
-        raise ValueError(msg)
+        raise TypeError(msg)
     if isinstance(score, int | float):
         return float(score)
     msg = "rubric score must be numeric"
-    raise ValueError(msg)
+    raise TypeError(msg)
 
 
 def parse_rubric_standard(standard: Any) -> list[str]:
@@ -255,10 +255,7 @@ def merge_rubric_items(
         overlay[item.key or item.name] = item
         overlay[item.name] = item
 
-    merged: list[RubricItem] = []
-    for item in default_items:
-        merged.append(overlay.get(item.key or item.name, item))
-    return merged
+    return [overlay.get(item.key or item.name, item) for item in default_items]
 
 
 def parse_format_requirement_label(label: Any) -> str:
@@ -339,7 +336,7 @@ def normalize_structured_format_requirements(
 
     sections = payload.get("sections", [])
     if not isinstance(sections, list):
-        raise ValueError("format rubric sections must be a list")
+        raise TypeError("format rubric sections must be a list")
 
     section_items: list[dict[str, Any]] = []
     display_items: list[dict[str, str]] = []
@@ -355,9 +352,10 @@ def normalize_structured_format_requirements(
             check: dict[str, Any] = rule.get("check", {})
             if not isinstance(check, dict):
                 check = {}
+            rule_label = str(rule.get("label") or rule.get("id") or "").strip()
             display_items.append(
                 {
-                    "label": f"{section_label} / {str(rule.get('label') or rule.get('id') or '').strip()}",
+                    "label": f"{section_label} / {rule_label}",
                     "value": stringify_format_requirement_value(
                         check.get("expected", "")
                     ),

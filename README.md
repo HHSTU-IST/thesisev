@@ -22,7 +22,7 @@
 - 历史记录：自动保存最近评审记录（写入带线程锁与原子替换）；上传文件仅用于本次评审。
 - 异步评审：`/evaluate/upload` 提交后立即返回 `job_id`，解析与 LLM 评审在有界线程池后台执行，前端轮询任务状态，避免并发评审阻塞事件循环。
 - 多入口使用：同时提供 CLI、FastAPI API 和内置 Web UI，便于命令行调用、接口集成和页面操作。
-- 可回归性：`tests/` 固化评分分发、rubric key、格式合规率阈值、LLM 降级/钳制与任务化评审等行为。
+- 可回归性：本地 `tests/` 固化评分分发、rubric key、格式合规率阈值、LLM 降级/钳制与任务化评审等行为（该目录不进版本库，详见「目录说明」）。
 
 ## 快速开始
 
@@ -59,6 +59,8 @@ uv run pytest tests -q                # 回归测试
 # 或一键执行以上全部检查：
 ./scripts/check_all.sh
 ```
+
+`tests/` 不进版本库，仅存在于开发机，因此全新 clone 上 `check_all.sh` 会自动跳过测试步骤并打印提示，其余检查照常执行。
 
 ## CLI
 
@@ -270,12 +272,12 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 
 - `config/`：静态配置文件，包括评分标准与格式要求（`score_*.json`）、文本词典（`colloquial.json`、`stopwords.json`、`punctuation_*.json`）和 `provider_env.toml`
 - `data/`：运行时数据，包括历史记录和上传过程中的临时文件
-- `examples/`：可直接运行的样例论文（`sample_thesis.md`）
+- `examples/`：可直接运行的样例论文（`sample_thesis.md`）；与 `tests/` 一样被 `.gitignore` 忽略，仅存在于开发机
 - `static/`：前端静态资源，包括样式和交互脚本
 - `templates/`：FastAPI 内置 UI 的 HTML 模板
-- `tests/`：回归测试（rubric key、格式合规率、评分分发与总分一致性）
+- `tests/`：本地回归测试（rubric key、格式合规率、评分分发与总分一致性）；被 `.gitignore` 忽略，不进版本库
 - `thesisev/`：核心 Python 包，包括解析、分析、本地评分、内容评价生成、CLI 和 API
-- `scripts/`：项目启动脚本
+- `scripts/`：项目启动与质量检查脚本
 
 ## 架构图
 
