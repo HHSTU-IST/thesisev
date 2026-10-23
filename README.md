@@ -98,7 +98,7 @@ uv run thesisev examples/sample_thesis.md --preset thesis_tech --json
 | `--engine`     | `local`    | `local` 走本机 Ollama，论文不出本机；`remote` 走 DeepSeek API                                                     |
 | `--provider`   | 跟随引擎   | 显式指定模型提供方，优先级高于 `--engine`（引擎由提供方推导，故 `--provider deepseek` 与 `--engine remote` 等价） |
 | `--model`      | 跟随提供方 | 显式模型名。`local` 默认 `qwen3:8b`，`remote` 默认 `deepseek-flash`                                               |
-| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `2048`                                                                |
+| `--max-tokens` | 跟随提供方 | 输出上限。`local` 默认 `1024`，`remote` 默认 `2048`                                                               |
 
 ```bash
 uv run thesisev examples/sample_thesis.md --engine remote --model deepseek-v4-pro
