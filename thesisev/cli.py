@@ -9,6 +9,19 @@ from pathlib import Path
 
 from thesisev.analyzers import split_technology_stack
 from thesisev.api import evaluate_document, resolve_preset_files, structure_document
+from thesisev.llm import (
+    ENGINE_LOCAL,
+    ENGINE_REMOTE,
+    build_model_config,
+    local_context_hint,
+    resolve_runtime,
+)
+from thesisev.models import (
+    EvaluationResult,
+    Section,
+    TechnologyStackItem,
+    ThesisDocument,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,7 +29,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="thesisev",
-        description="Analyze a thesis file and produce a structure or evaluation report.",
+        description=(
+            "Analyze a thesis file and produce a structure or evaluation report."
+        ),
     )
     parser.add_argument("path", help="Path to a md or docx thesis file.")
     parser.add_argument(
@@ -31,9 +46,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print machine-readable JSON instead of the human-readable output.",
     )
     parser.add_argument(
+        "--engine",
+        choices=(ENGINE_LOCAL, ENGINE_REMOTE),
+        default=ENGINE_LOCAL,
+        help=(
+            "Inference engine. 'local' (default) uses the on-host Ollama server "
+            "so the thesis never leaves this machine; 'remote' calls the "
+            "DeepSeek API and requires DEEPSEEK_API_KEY."
+        ),
+    )
+    parser.add_argument(
         "--provider",
-        default="deepseek",
-        help="LLM provider for comment generation, default is deepseek.",
+        default=None,
+        help=(
+            "LLM provider, overriding --engine. Defaults to the provider that "
+            "backs the selected engine."
+        ),
     )
     parser.add_argument(
         "--model",
@@ -49,14 +77,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=400,
-        help="Maximum output tokens for generated commentary.",
+        default=None,
+        help=(
+            "Maximum output tokens for generated commentary. "
+            "If omitted, the provider's own default is used."
+        ),
     )
     parser.add_argument(
         "--preset",
-        choices=("thesis_tech", "report_iot"),
+        choices=("thesis_tech",),
         default="thesis_tech",
-        help="Built-in scoring preset, such as thesis_tech or report_iot.",
+        help="Built-in scoring preset. Currently only thesis_tech is supported.",
     )
     return parser
 
@@ -80,27 +111,47 @@ def main() -> int:
         return 0
 
     rubric_filename, _format_filename = resolve_preset_files(args.preset)
-    result = evaluate_document(
-        source,
+    model_config = build_model_config(
+        engine=args.engine,
         provider=args.provider,
         model=args.model,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
+    )
+    model_config, runtime_warning = resolve_runtime(model_config)
+    if runtime_warning:
+        print(f"warning: {runtime_warning}", file=sys.stderr)
+    result = evaluate_document(
+        source,
+        model_config=model_config,
         rubric_filename=rubric_filename,
     )
     if args.json:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     else:
+        context_hint = local_context_hint(model_config)
+        if context_hint:
+            print(f"note: {context_hint}", file=sys.stderr)
         print_report(result)
     return 0
 
 
-def print_report(result) -> None:
+def print_report(result: EvaluationResult) -> None:
     """Print a human-readable evaluation report."""
 
     print(f"Title: {result.document.title}")
     print(f"Source: {result.document.source_path}")
     print(f"Type: {result.document.source_type}")
+    model_meta = result.metadata.get("model", {})
+    engine_label = "本地" if model_meta.get("engine") == ENGINE_LOCAL else "远程"
+    print(
+        f"Engine: {engine_label} ({model_meta.get('provider', '-')}"
+        f"/{model_meta.get('model', '-')})"
+        f" available={model_meta.get('available', False)}"
+        f" ({model_meta.get('availability', '-')})"
+    )
+    print(f"Score Source: {result.metadata.get('score_source', 'local')}")
+    print(f"Comment Source: {result.metadata.get('comment_source', 'fallback')}")
     print()
     print("Statistics:")
     for item in result.statistics:
@@ -121,12 +172,10 @@ def print_report(result) -> None:
     print("Content Evaluation:")
     print(result.comment)
     print("Comment Checks:")
-    print(
-        f"- keyword_coverage: {'ok' if result.comment_checks.get('passes_keyword_coverage') else 'needs review'}"
-    )
-    print(
-        f"- title_repetition: {'ok' if not result.comment_checks.get('repeats_title') else 'needs review'}"
-    )
+    keyword_coverage = result.comment_checks.get("passes_keyword_coverage")
+    print(f"- keyword_coverage: {'ok' if keyword_coverage else 'needs review'}")
+    repeats_title = result.comment_checks.get("repeats_title")
+    print(f"- title_repetition: {'ok' if not repeats_title else 'needs review'}")
     print()
     print("Format Issues:")
     if not result.issues:
@@ -135,7 +184,8 @@ def print_report(result) -> None:
     for issue in result.issues:
         print(
             f"- [{issue.category}] {issue.section_identifier} {issue.section_title} "
-            f"(P{issue.paragraph_index}, S{issue.sentence_index}, rule={issue.rule_id}): "
+            f"(P{issue.paragraph_index}, S{issue.sentence_index}, "
+            f"rule={issue.rule_id}): "
             f"{issue.message}\n"
             f"  Matched: {issue.matched_text}\n"
             f"  Suggestion: {issue.suggestion}\n"
@@ -143,7 +193,9 @@ def print_report(result) -> None:
         )
 
 
-def build_technology_stack_lines(technology_details) -> list[str]:
+def build_technology_stack_lines(
+    technology_details: list[TechnologyStackItem],
+) -> list[str]:
     """Build software and hardware technology-stack lines for the CLI."""
 
     grouped = split_technology_stack(technology_details)
@@ -152,7 +204,7 @@ def build_technology_stack_lines(technology_details) -> list[str]:
     return [f"- 软件技术栈: {software}", f"- 硬件技术栈: {hardware}"]
 
 
-def print_structure(document) -> None:
+def print_structure(document: ThesisDocument) -> None:
     """Print a human-readable structure report."""
 
     print(f"Title: {document.title}")
@@ -165,9 +217,8 @@ def print_structure(document) -> None:
         relevant_paragraphs = sum(
             paragraph.topic_is_relevant for paragraph in document.paragraphs
         )
-        print(
-            f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{len(document.paragraphs)}"
-        )
+        total_paragraphs = len(document.paragraphs)
+        print(f"Topic-Relevant Paragraphs: {relevant_paragraphs}/{total_paragraphs}")
     print()
     if document.front_matter:
         print("Front Matter:")
@@ -178,7 +229,7 @@ def print_structure(document) -> None:
         print_section_tree(section)
 
 
-def print_section_tree(section, indent: int = 0) -> None:
+def print_section_tree(section: Section, indent: int = 0) -> None:
     """Print a section and its children recursively."""
 
     prefix = "  " * indent

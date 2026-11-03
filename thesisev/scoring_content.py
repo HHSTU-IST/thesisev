@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
-from thesisev.scoring import RubricItem, ScoreCriterion, build_criterion
+from thesisev.rubric_utils import RubricItem, ScoreCriterion, build_criterion
 
 
 def score_topic_workload(
@@ -63,9 +63,7 @@ def score_topic_workload(
 
 
 def score_research_argument(
-    document: ThesisDocument,
-    keywords: list[str],
-    rubric_item: RubricItem,
+    document: ThesisDocument, keywords: list[str], rubric_item: RubricItem
 ) -> ScoreCriterion:
     """Score literature use and argumentation signals."""
 
@@ -115,8 +113,7 @@ def score_research_argument(
 
 
 def score_translation(
-    document: ThesisDocument,
-    rubric_item: RubricItem,
+    document: ThesisDocument, rubric_item: RubricItem
 ) -> ScoreCriterion:
     """Score Chinese-English abstract translation completeness."""
 
@@ -224,9 +221,7 @@ def score_experiment_analysis(
 
 
 def score_writing_quality(
-    document: ThesisDocument,
-    writing_issues: list[Issue],
-    rubric_item: RubricItem,
+    document: ThesisDocument, writing_issues: list[Issue], rubric_item: RubricItem
 ) -> ScoreCriterion:
     """Score writing quality from locally detected writing issues."""
 
