@@ -1,10 +1,32 @@
+# Provider credentials and endpoints.
+#
+# ``api_key_env`` / ``base_url_env`` name environment variables and are the
+# recommended form: they keep secrets out of the repository. ``api_key`` /
+# ``base_url`` may instead hold literal values for a local, uncommitted
+# override, and are only read when the matching environment variable is unset.
+#
+# Default engine: local, served by Ollama on this host.  It needs no
+# credential, so no ``api_key_env`` is declared.  Raise the context window on
+# the server side before starting it -- the OpenAI-compatible route discards
+# ``num_ctx`` from the request body:
+#
+#     OLLAMA_CONTEXT_LENGTH=16384 ollama serve
+#
+# Remote engine: export DEEPSEEK_API_KEY=sk-...
+# Documented model IDs are ``deepseek-flash`` and ``deepseek-v4-pro``.
+
+[providers.ollama]
+base_url = "http://127.0.0.1:11434/v1"
+base_url_env = "OLLAMA_BASE_URL"
+
 [providers.deepseek]
-api_key = "sk-ef1c91b83cf347a186ab8518ad488223"
+api_key_env = "DEEPSEEK_API_KEY"
 base_url = "https://api.deepseek.com"
+base_url_env = "DEEPSEEK_BASE_URL"
 
 [providers.openai]
-api_key = "OPENAI_API_KEY"
-base_url = "https://api.openai.com/v1/chat"
+api_key_env = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
 
 [providers.anthropic]
-api_key = "ANTHROPIC_API_KEY"
+api_key_env = "ANTHROPIC_API_KEY"

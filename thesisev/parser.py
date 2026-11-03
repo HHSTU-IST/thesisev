@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from zipfile import BadZipFile, ZipFile, ZipInfo
 
 from docx import Document as load_docx_document
@@ -68,7 +68,7 @@ def load_document(path: str | Path) -> ThesisDocument:
         title = extract_document_title(front_matter, fallback=source_path.stem)
     else:
         raw_text = read_source_text(source_path)
-        format_snapshot = {}
+        format_snapshot: dict[str, Any] = {}
         cleaned_text = clean_text(raw_text)
         lines = [line.strip() for line in cleaned_text.splitlines()]
         title = next((line for line in lines if line), source_path.stem)
@@ -79,9 +79,8 @@ def load_document(path: str | Path) -> ThesisDocument:
     sentences = flatten_sentence_text(paragraphs)
     total_word_count = sum(paragraph.word_count for paragraph in paragraphs)
     abstract = find_abstract(sections, front_matter)
-    if isinstance(format_snapshot, dict):
-        format_snapshot["word_count"] = total_word_count
-        format_snapshot["section_count"] = len(sections)
+    format_snapshot["word_count"] = total_word_count
+    format_snapshot["section_count"] = len(sections)
 
     return ThesisDocument(
         title=title,
@@ -109,13 +108,10 @@ def extract_document_title(text: str, *, fallback: str) -> str:
             match = pattern.match(line)
             if match is None:
                 continue
-            candidate = match.group("title").strip()
+            candidate = cast(str, match.group("title")).strip()
             if is_document_title_candidate(candidate):
                 return candidate
-    return next(
-        (line for line in lines if is_document_title_candidate(line)),
-        fallback,
-    )
+    return next((line for line in lines if is_document_title_candidate(line)), fallback)
 
 
 def is_document_title_candidate(text: str) -> bool:
@@ -166,12 +162,6 @@ def read_docx_text_from_document(document: Any) -> str:
             )
         paragraphs.append(text)
     return "\n\n".join(paragraphs)
-
-
-def read_docx_format_snapshot(path: Path) -> dict[str, Any]:
-    """Extract a compact formatting snapshot from a docx file."""
-
-    return read_docx_format_snapshot_from_document(open_docx_document(path))
 
 
 def read_docx_format_snapshot_from_document(document: Any) -> dict[str, Any]:
@@ -227,9 +217,7 @@ def parse_docx_sections(document: Any) -> tuple[str, list[Section]]:
             continue
         lines.append(paragraph_text)
         heading = match_docx_paragraph_heading(
-            paragraph,
-            paragraph_text,
-            allow_text_fallback=not has_styled_headings,
+            paragraph, paragraph_text, allow_text_fallback=not has_styled_headings
         )
         if heading is not None:
             headings.append(
@@ -281,13 +269,11 @@ def open_docx_document(path: Path) -> Any:
         with ZipFile(path) as archive:
             validate_docx_archive_members(archive)
             validate_docx_member_size(
-                get_docx_document_xml_info(archive),
-                max_size=MAX_DOCX_MEMBER_BYTES,
+                get_docx_document_xml_info(archive), max_size=MAX_DOCX_MEMBER_BYTES
             )
             if "word/styles.xml" in archive.namelist():
                 validate_docx_member_size(
-                    archive.getinfo("word/styles.xml"),
-                    max_size=MAX_DOCX_MEMBER_BYTES,
+                    archive.getinfo("word/styles.xml"), max_size=MAX_DOCX_MEMBER_BYTES
                 )
     except BadZipFile as exc:
         msg = "invalid docx archive"
@@ -336,12 +322,6 @@ def iter_docx_nested_tables(table: Any):
             for nested_table in getattr(cell, "tables", []):
                 yield nested_table
                 yield from iter_docx_nested_tables(nested_table)
-
-
-def iter_docx_runs(paragraph: Any):
-    """Iterate runs from a paragraph."""
-
-    yield from getattr(paragraph, "runs", [])
 
 
 def normalize_docx_paragraph_text(text: str) -> str:
@@ -408,7 +388,7 @@ def resolve_docx_style_map(
             return resolved[style_id]
         style = style_map.get(style_id, {})
         base_style_id = style.get("based_on")
-        base = resolve_style(base_style_id) if base_style_id else {}
+        base: dict[str, Any] = resolve_style(base_style_id) if base_style_id else {}
         merged = {
             "name": style.get("name") or base.get("name"),
             "based_on": base_style_id,
@@ -523,9 +503,7 @@ def extract_docx_paragraph_snapshot(
                 "runs per paragraph", MAX_DOCX_RUNS_PER_PARAGRAPH
             )
         run_snapshot = extract_docx_run_snapshot(
-            run,
-            style_map=style_map,
-            paragraph_style_snapshot=style_snapshot,
+            run, style_map=style_map, paragraph_style_snapshot=style_snapshot
         )
         if run_snapshot["text"] or any(
             run_snapshot[key] is not None
@@ -534,7 +512,7 @@ def extract_docx_paragraph_snapshot(
             runs.append(run_snapshot)
 
     text = normalize_docx_paragraph_text(getattr(paragraph, "text", ""))
-    primary_run = next(
+    primary_run: dict[str, Any] = next(
         (run for run in runs if run.get("text")), runs[0] if runs else {}
     )
     return {
@@ -603,7 +581,9 @@ def read_docx_font_name(element_owner: Any) -> str | None:
             value = fonts.get(qn(attribute))
             if value:
                 return str(value)
-    return getattr(getattr(element_owner, "font", None), "name", None)
+    font = getattr(element_owner, "font", None)
+    name = getattr(font, "name", None)
+    return name if isinstance(name, str) else None
 
 
 def extract_docx_table_snapshot(table: Any) -> dict[str, Any]:
@@ -650,7 +630,7 @@ def parse_docx_length(value: Any) -> float | None:
     except AttributeError:
         try:
             return round(float(value) / 12700, 2)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return None
 
 
@@ -681,7 +661,7 @@ def parse_docx_line_spacing_from_paragraph(paragraph: Any) -> float | None:
         return round(float(line_spacing), 2)
     try:
         return round(float(line_spacing), 2)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return parse_docx_length(line_spacing)
 
 
@@ -752,9 +732,8 @@ def normalize_docx_alignment(value: Any) -> str | None:
 
     if value is None:
         return None
-    token = getattr(value, "name", None)
-    if token is None:
-        token = str(value)
+    token_value = getattr(value, "name", None)
+    token = str(value) if token_value is None else cast(str, token_value)
     token = token.replace("WD_PARAGRAPH_ALIGNMENT.", "").replace("_", " ")
     token = token.strip().lower()
     aliases = {
@@ -851,15 +830,15 @@ def match_section_heading(line: str) -> tuple[int, str, str, str] | None:
 
     markdown_match = MARKDOWN_HEADING_PATTERN.match(line)
     if markdown_match is not None:
-        line = markdown_match.group(1).strip()
+        line = cast(str, markdown_match.group(1)).strip()
 
     if is_reference_heading(line):
         return 1, line, line, line
 
     match = SECTION_PATTERN.match(line)
     if match is not None:
-        numbering = match.group("prefix").strip()
-        title = match.group("title").strip()
+        numbering = cast(str, match.group("prefix")).strip()
+        title = cast(str, match.group("title")).strip()
         return infer_level(numbering), title, numbering, line
     return None
 
@@ -1080,12 +1059,6 @@ def split_paragraphs(text: str) -> list[str]:
     """Split text into non-empty paragraph strings."""
 
     return [paragraph.text for paragraph in build_paragraphs(text)]
-
-
-def split_sentences(text: str) -> list[str]:
-    """Split text into non-empty sentence strings."""
-
-    return flatten_sentence_text(build_paragraphs(text))
 
 
 def find_abstract(sections: list[Section], front_matter: str) -> str:
