@@ -119,7 +119,7 @@ def main() -> int:
         max_tokens=args.max_tokens,
     )
     model_config, runtime_warning = resolve_runtime(model_config)
-    if runtime_warning:
+    if bool(runtime_warning):
         print(f"warning: {runtime_warning}", file=sys.stderr)
     result = evaluate_document(
         source,
@@ -130,7 +130,7 @@ def main() -> int:
         print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
     else:
         context_hint = local_context_hint(model_config)
-        if context_hint:
+        if context_hint is not None:
             print(f"note: {context_hint}", file=sys.stderr)
         print_report(result)
     return 0

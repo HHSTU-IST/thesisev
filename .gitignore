@@ -33,12 +33,12 @@ __pycache__
 *.lock
 
 *.docx
+!tests/**/*.docx
+!examples/**/*.docx
 
 # Extras
 .workbuddy
 articles
-examples
-tests
 test.*
 
 data/uploads/

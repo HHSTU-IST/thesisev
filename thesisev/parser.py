@@ -682,7 +682,7 @@ def parse_docx_line_spacing_from_style(style: Any) -> float | None:
 def normalize_docx_style_name(value: str | None) -> str | None:
     """Normalize a docx style identifier into a display name."""
 
-    if not value:
+    if value is None or value == "":
         return None
     normalized = value.replace("_", " ").strip()
     normalized = re.sub(r"\s+", " ", normalized)
@@ -699,9 +699,9 @@ def resolve_docx_style_snapshot(
 ) -> dict[str, Any]:
     """Resolve a paragraph style id to its effective formatting snapshot."""
 
-    if not style_id:
+    if style_id is None or style_id == "":
         return {}
-    if not style_map:
+    if style_map is None:
         return {"name": normalize_docx_style_name(style_id)}
     style = style_map.get(style_id)
     if style is None:
@@ -863,7 +863,7 @@ def match_docx_style_heading(
 
     style = getattr(paragraph, "style", None)
     style_name = normalize_docx_style_name(getattr(style, "name", None))
-    if style_name and style_name.lower().startswith("heading"):
+    if style_name is not None and style_name.lower().startswith("heading"):
         level_match = re.search(r"(\d+)", style_name)
         level = int(level_match.group(1)) if level_match else 1
         title = line.strip()

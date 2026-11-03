@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -51,17 +52,61 @@ FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
     "score_thesis_tech.json": "score_thesis_tech_f.json",
 }
 
-#: Stable keys implemented by the local content scorers in scoring_content.py.
-THESIS_LOCAL_SCORER_KEYS = frozenset(
-    {
-        "topic_workload",
-        "research_argument",
-        "translation",
-        "experiment_analysis",
-        "writing_quality",
-        "innovation",
-    }
-)
+
+#: Bundle of everything a local content scorer may need. Keeping one context
+#: object lets the registry store uniform callables despite the underlying
+#: ``scoring_content`` functions having different argument lists.
+class _LocalScoringContext(TypedDict):
+    document: ThesisDocument
+    topic_analysis: dict[str, Any]
+    format_issues: list[Issue]
+    writing_issues: list[Issue]
+    keywords: list[str]
+    technology_details: list[TechnologyStackItem]
+    format_requirements: dict[str, Any] | None
+    rubric_item: RubricItem
+    rubric_filename: str
+
+
+#: A local scorer: consumes the shared context, returns one criterion.
+LocalScorer = Callable[[_LocalScoringContext], ScoreCriterion]
+
+#: Registry mapping each stable rubric key to its local scorer. Adding a new
+#: content rule is now: implement the scorer in ``scoring_content`` and add one
+#: entry here (plus its rubric config) — no frozenset edit and no if/elif chain.
+LOCAL_SCORERS: dict[str, LocalScorer] = {
+    "topic_workload": lambda ctx: score_topic_workload(
+        ctx["document"],
+        ctx["topic_analysis"],
+        ctx["technology_details"],
+        ctx["rubric_item"],
+    ),
+    "research_argument": lambda ctx: score_research_argument(
+        ctx["document"],
+        ctx["keywords"],
+        ctx["rubric_item"],
+    ),
+    "translation": lambda ctx: score_translation(ctx["document"], ctx["rubric_item"]),
+    "experiment_analysis": lambda ctx: score_experiment_analysis(
+        ctx["document"],
+        ctx["technology_details"],
+        ctx["rubric_item"],
+    ),
+    "writing_quality": lambda ctx: score_writing_quality(
+        ctx["document"],
+        ctx["writing_issues"],
+        ctx["rubric_item"],
+    ),
+    "innovation": lambda ctx: score_innovation(
+        ctx["document"],
+        ctx["technology_details"],
+        ctx["rubric_item"],
+    ),
+}
+
+#: Stable keys implemented by the local content scorers, derived from the
+#: registry so this set and :data:`LOCAL_SCORERS` can never diverge.
+THESIS_LOCAL_SCORER_KEYS = frozenset(LOCAL_SCORERS)
 
 #: Stand-in text the scoring prompt puts in the JSON skeleton.  The skeleton is
 #: pre-filled with the real criterion identity, so a model that answers by
@@ -171,16 +216,20 @@ def score_rubric_items(
         "format_requirements": format_requirements,
     }
     criteria: list[ScoreCriterion] = []
+    shared_model: Any = None
     for item in rubric_items:
         method = item.evaluation.strip().lower()
         if method == "llm" and model_config is not None and model_config.is_available():
             try:
+                if shared_model is None:
+                    shared_model = create_chat_model(model_config)
                 criteria.append(
                     score_item_with_llm(
                         content_context=content_context,
                         rubric_item=item,
                         rubric_filename=rubric_filename,
                         model_config=model_config,
+                        model=shared_model,
                     )
                 )
             except Exception as exc:  # noqa: BLE001 - degrade one item, never fail the review
@@ -256,17 +305,23 @@ def score_item_with_llm(
     rubric_item: RubricItem,
     rubric_filename: str,
     model_config: ModelConfig,
+    model: Any = None,
 ) -> ScoreCriterion:
-    """Score a single rubric item with the LLM."""
+    """Score a single rubric item with the LLM.
+
+    ``model`` lets the caller pass a chat client that is reused across several
+    rubric items (one HTTP connection pool per evaluation); when it is omitted a
+    client is built from ``model_config``.
+    """
 
     prompt = build_score_prompt(
         content_context=content_context,
         rubric_items=[rubric_item],
         rubric_filename=rubric_filename,
     )
-    model = create_chat_model(model_config)
+    chat_model = model if model is not None else create_chat_model(model_config)
     response = invoke_chat_model_with_retry(
-        model,
+        chat_model,
         [
             SystemMessage(
                 content=(
@@ -303,20 +358,20 @@ def score_item_locally(
     """
 
     key = rubric_item.key or rubric_item.name
-    if key == "topic_workload":
-        return score_topic_workload(
-            document, topic_analysis, technology_details, rubric_item
-        )
-    if key == "research_argument":
-        return score_research_argument(document, keywords, rubric_item)
-    if key == "translation":
-        return score_translation(document, rubric_item)
-    if key == "experiment_analysis":
-        return score_experiment_analysis(document, technology_details, rubric_item)
-    if key == "writing_quality":
-        return score_writing_quality(document, writing_issues, rubric_item)
-    if key == "innovation":
-        return score_innovation(document, technology_details, rubric_item)
+    ctx: _LocalScoringContext = {
+        "document": document,
+        "topic_analysis": topic_analysis,
+        "format_issues": format_issues,
+        "writing_issues": writing_issues,
+        "keywords": keywords,
+        "technology_details": technology_details,
+        "format_requirements": format_requirements,
+        "rubric_item": rubric_item,
+        "rubric_filename": rubric_filename,
+    }
+    scorer = LOCAL_SCORERS.get(key)
+    if scorer is not None:
+        return scorer(ctx)
     if key == FORMAT_RUBRIC_KEY or rubric_item.name == "格式规范":
         format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
         if format_filename is None:
@@ -363,13 +418,20 @@ def build_score_report(
     )
 
 
+#: ``evaluation`` tokens that all mean "this criterion was produced without a
+#: live LLM contribution": the plain local rubric scorer, the deterministic
+#: format-compliance engine, and the fallback used when an LLM-labelled item
+#: could not be scored remotely.
+_LOCAL_EVALUATION_TOKENS = frozenset({"local", "local_program", "llm_fallback_local"})
+
+
 def determine_score_source(criteria: list[ScoreCriterion]) -> str:
     """Summarize how the final score was produced."""
 
-    sources = {item.evaluation or "local" for item in criteria}
+    sources = {(item.evaluation or "local").strip().lower() for item in criteria}
     if sources == {"llm"}:
         return "llm"
-    if sources <= {"local"}:
+    if sources <= _LOCAL_EVALUATION_TOKENS:
         return "local"
     return "mixed"
 
@@ -658,7 +720,7 @@ def resolve_rubric_items(
         ),
         rubric_filename=rubric_filename,
     )
-    if rubric and rubric.get("items"):
+    if rubric is not None and rubric.get("items"):
         return merge_rubric_items(
             default_items, normalize_rubric_items(rubric["items"], require_all=False)
         ), str(rubric.get("source_name") or "uploaded_rubric.json")
@@ -673,7 +735,7 @@ def append_builtin_format_rubric_item(
     if any(item.name == "格式规范" for item in items):
         return items
     format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
-    if not format_filename:
+    if format_filename is None:
         return items
     return [*items, build_format_rubric_item(format_filename)]
 

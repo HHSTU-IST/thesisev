@@ -10,14 +10,20 @@ provider:
 
 ``remote`` (provider ``deepseek``)
     DeepSeek's hosted API.  Higher scoring quality on subjective rubric items,
-    at the cost of uploading the document to a third party and of a model
-    alias that can be re-pointed without notice.
+    at the cost of uploading the document to a third party and of a model alias
+    that can be re-pointed without notice.
 
 Because the engine is derived, ``--provider deepseek`` and ``--engine remote``
 are equivalent; :func:`build_model_config` maps an engine name onto its
 provider.  Both engines share the same LangChain call path, so switching only
 changes the endpoint and the request body, and neither needs an extra
 dependency.
+
+Every provider's defaults -- default model, base URL, output-token budget,
+locality, placeholder key and the provider-specific ``extra_body`` builder --
+live in one :data:`PROVIDER_SPECS` table.  Adding a provider means adding a
+single :class:`ProviderSpec` entry; no dispatch ``if``/``elif`` chain has to be
+edited.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ import time
 import tomllib
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -42,10 +49,6 @@ logger = logging.getLogger(__name__)
 ENGINE_LOCAL = "local"
 ENGINE_REMOTE = "remote"
 
-#: Providers served from this host.  They need no credential, so they count as
-#: available as soon as their runtime is reachable.
-LOCAL_PROVIDERS = frozenset({"ollama"})
-
 #: Provider selected for each engine when the caller names only an engine.
 ENGINE_PROVIDERS: dict[str, str] = {
     ENGINE_LOCAL: "ollama",
@@ -55,13 +58,6 @@ ENGINE_PROVIDERS: dict[str, str] = {
 DEFAULT_ENGINE = ENGINE_LOCAL
 DEFAULT_PROVIDER = ENGINE_PROVIDERS[DEFAULT_ENGINE]
 DEFAULT_MODEL = "qwen3:8b"
-
-DEFAULT_BASE_URLS: dict[str, str] = {
-    "ollama": "http://127.0.0.1:11434/v1",
-    "deepseek": "https://api.deepseek.com",
-}
-DEFAULT_DEEPSEEK_BASE_URL = DEFAULT_BASE_URLS["deepseek"]
-DEFAULT_OLLAMA_BASE_URL = DEFAULT_BASE_URLS["ollama"]
 
 #: Ollama ignores the API key, but the OpenAI client refuses to build without
 #: one, so a placeholder is supplied for the local engine.
@@ -78,8 +74,7 @@ OLLAMA_PLACEHOLDER_API_KEY = "ollama"
 #: stops at ``finish_reason=length``, the JSON ends mid-string, and the caller
 #: silently degrades to the local rules, so the ``400`` default that used to sit
 #: here cost the score items *and* the whole deep review without a visible
-#: error.  Callers can still tighten it through the CLI and the API.
-DEFAULT_MAX_TOKENS: dict[str, int] = {"ollama": 1024, "deepseek": 2048}
+#: error.  Providers without an explicit budget fall back to this floor.
 FALLBACK_MAX_TOKENS = 400
 
 #: DeepSeek retired the ``deepseek-chat`` / ``deepseek-reasoner`` aliases on
@@ -99,7 +94,7 @@ LOCAL_CONTEXT_ENV = "OLLAMA_CONTEXT_LENGTH"
 def _read_env(name: str | None) -> str | None:
     """Read a non-empty environment variable, if a name was configured."""
 
-    if not name:
+    if name is None:
         return None
     return os.getenv(name) or None
 
@@ -130,7 +125,7 @@ class ProviderSettings:
         """Return the credential value, preferring the environment variable."""
 
         from_env = _read_env(self.api_key_env)
-        if from_env:
+        if from_env is not None:
             return from_env
         return self.api_key
 
@@ -138,9 +133,104 @@ class ProviderSettings:
         """Return the endpoint base URL, preferring the environment variable."""
 
         from_env = _read_env(self.base_url_env)
-        if from_env:
+        if from_env is not None:
             return from_env
         return self.base_url or default
+
+
+def build_deepseek_extra_body(max_tokens: int) -> dict[str, Any]:
+    """Build the DeepSeek-specific top-level request fields.
+
+    ``extra_body`` is merged into the top-level JSON body by the OpenAI SDK,
+    which is the only route to DeepSeek's own ``thinking`` switch.  Thinking is
+    disabled because it is enabled by default, and the chain of thought would
+    otherwise consume the token budget and pollute the JSON reply.
+    """
+
+    return {"thinking": {"type": "disabled"}, "max_tokens": max_tokens}
+
+
+def build_ollama_extra_body(max_tokens: int) -> dict[str, Any]:
+    """Build the Ollama-specific top-level request fields.
+
+    ``reasoning_effort`` is the OpenAI-compatible route to Ollama's thinking
+    switch; ``"none"`` requests no thinking output.  Qwen3 runs with thinking
+    enabled by default in Ollama, and the trace would otherwise eat the token
+    budget and leave ``content`` empty.  The native ``think`` field is not
+    accepted on this route -- only the Responses API exposes it.
+    """
+
+    return {"reasoning_effort": "none", "max_tokens": max_tokens}
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSpec:
+    """All built-in defaults for one provider, in a single place.
+
+    ``extra_body_builder`` is ``None`` for providers reached through the
+    generic :func:`init_chat_model` path rather than the OpenAI-compatible
+    client; those providers still get their default model and locality from
+    this record, so adding one never touches a dispatch chain.
+    """
+
+    default_model: str
+    base_url: str | None
+    max_tokens: int
+    is_local: bool
+    placeholder_api_key: str | None = None
+    extra_body_builder: Callable[[int], dict[str, Any]] | None = None
+
+
+#: Single source of truth for provider defaults.  Add a provider by adding an
+#: entry here -- ``LOCAL_PROVIDERS``, the base-URL / model / budget tables and
+#: :func:`create_chat_model` all derive from it.
+PROVIDER_SPECS: dict[str, ProviderSpec] = {
+    "ollama": ProviderSpec(
+        default_model=DEFAULT_MODEL,
+        base_url="http://127.0.0.1:11434/v1",
+        max_tokens=1024,
+        is_local=True,
+        placeholder_api_key=OLLAMA_PLACEHOLDER_API_KEY,
+        extra_body_builder=build_ollama_extra_body,
+    ),
+    "deepseek": ProviderSpec(
+        default_model="deepseek-flash",
+        base_url="https://api.deepseek.com",
+        max_tokens=2048,
+        is_local=False,
+        extra_body_builder=build_deepseek_extra_body,
+    ),
+    "openai": ProviderSpec(
+        default_model="gpt-4o-mini",
+        base_url=None,
+        max_tokens=FALLBACK_MAX_TOKENS,
+        is_local=False,
+    ),
+    "anthropic": ProviderSpec(
+        default_model="claude-3-5-haiku-latest",
+        base_url=None,
+        max_tokens=FALLBACK_MAX_TOKENS,
+        is_local=False,
+    ),
+}
+
+#: Providers served from this host.  They need no credential, so they count as
+#: available as soon as their runtime is reachable.
+LOCAL_PROVIDERS = frozenset(
+    name for name, spec in PROVIDER_SPECS.items() if spec.is_local
+)
+
+#: Derived convenience views, kept for callers and introspection.
+DEFAULT_BASE_URLS: dict[str, str] = {
+    name: spec.base_url
+    for name, spec in PROVIDER_SPECS.items()
+    if spec.base_url is not None
+}
+DEFAULT_DEEPSEEK_BASE_URL = DEFAULT_BASE_URLS["deepseek"]
+DEFAULT_OLLAMA_BASE_URL = DEFAULT_BASE_URLS["ollama"]
+DEFAULT_MAX_TOKENS: dict[str, int] = {
+    name: spec.max_tokens for name, spec in PROVIDER_SPECS.items()
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,13 +286,18 @@ class ModelConfig:
     def engine(self) -> str:
         """Return the engine this provider belongs to."""
 
-        return ENGINE_LOCAL if self.provider in LOCAL_PROVIDERS else ENGINE_REMOTE
+        return ENGINE_LOCAL if self.is_local else ENGINE_REMOTE
 
     @property
     def is_local(self) -> bool:
-        """Whether this provider is served from this host."""
+        """Whether this provider is served from this host.
 
-        return self.provider in LOCAL_PROVIDERS
+        Consulted live from :data:`PROVIDER_SPECS` so a newly registered
+        provider is reflected without rebuilding an import-time snapshot.
+        """
+
+        spec = PROVIDER_SPECS.get(self.provider)
+        return bool(spec and spec.is_local)
 
     @property
     def requires_credential(self) -> bool:
@@ -228,9 +323,10 @@ class ModelConfig:
     def base_url(self) -> str | None:
         """Return the resolved endpoint base URL for the configured provider."""
 
-        fallback = DEFAULT_BASE_URLS.get(self.provider)
+        spec = PROVIDER_SPECS.get(self.provider)
+        fallback = spec.base_url if spec is not None else None
         resolved = self.settings.resolve_base_url(fallback)
-        if resolved:
+        if resolved is not None:
             return resolved
         return fallback
 
@@ -241,9 +337,9 @@ class ModelConfig:
         if self.is_local:
             return "not-required"
         settings = self.settings
-        if _read_env(settings.api_key_env):
+        if _read_env(settings.api_key_env) is not None:
             return f"env:{settings.api_key_env}"
-        if settings.api_key:
+        if bool(settings.api_key):
             return "config"
         return None
 
@@ -268,7 +364,7 @@ class ModelConfig:
             return "runtime_unreachable"
         if not self.requires_credential:
             return "credential_not_required"
-        if self.api_key:
+        if bool(self.api_key):
             return f"credential:{self.credential_source}"
         return "credential_missing"
 
@@ -344,45 +440,21 @@ def _provider_for_engine(engine: str | None) -> str:
 
 
 def default_model_for_provider(provider: str) -> str:
-    """Return a sensible default model name for each provider."""
+    """Return the default model name recorded for a provider in the spec table.
 
-    return {
-        "ollama": DEFAULT_MODEL,
-        "deepseek": "deepseek-flash",
-        "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-5-haiku-latest",
-    }.get(provider, provider)
+    Unknown providers fall back to using the provider name as the model name,
+    mirroring the previous inline mapping's ``.get(provider, provider)``.
+    """
+
+    spec = PROVIDER_SPECS.get(provider)
+    return spec.default_model if spec is not None else provider
 
 
 def default_max_tokens_for_provider(provider: str) -> int:
-    """Return the output-token budget for each provider."""
+    """Return the output-token budget recorded for a provider in the spec table."""
 
-    return DEFAULT_MAX_TOKENS.get(provider, FALLBACK_MAX_TOKENS)
-
-
-def build_deepseek_extra_body(max_tokens: int) -> dict[str, Any]:
-    """Build the DeepSeek-specific top-level request fields.
-
-    ``extra_body`` is merged into the top-level JSON body by the OpenAI SDK,
-    which is the only route to DeepSeek's own ``thinking`` switch.  Thinking is
-    disabled because it is enabled by default, and the chain of thought would
-    otherwise consume the token budget and pollute the JSON reply.
-    """
-
-    return {"thinking": {"type": "disabled"}, "max_tokens": max_tokens}
-
-
-def build_ollama_extra_body(max_tokens: int) -> dict[str, Any]:
-    """Build the Ollama-specific top-level request fields.
-
-    ``reasoning_effort`` is the OpenAI-compatible route to Ollama's thinking
-    switch; ``"none"`` requests no thinking output.  Qwen3 runs with thinking
-    enabled by default in Ollama, and the trace would otherwise eat the token
-    budget and leave ``content`` empty.  The native ``think`` field is not
-    accepted on this route -- only the Responses API exposes it.
-    """
-
-    return {"reasoning_effort": "none", "max_tokens": max_tokens}
+    spec = PROVIDER_SPECS.get(provider)
+    return spec.max_tokens if spec is not None else FALLBACK_MAX_TOKENS
 
 
 def extract_response_text(response: Any) -> str:
@@ -402,13 +474,54 @@ def extract_response_text(response: Any) -> str:
     return str(content)
 
 
-def create_chat_model(config: ModelConfig):
-    """Create a LangChain chat model instance from the runtime config."""
+def _compatible_spec(
+    provider: str,
+) -> tuple[str, Callable[[int], dict[str, Any]], str | None]:
+    """Return ``(base_url, extra_body_builder, placeholder_key)`` for a backend.
 
-    if config.provider == "deepseek":
-        return create_deepseek_chat_model(config)
-    if config.provider == "ollama":
-        return create_ollama_chat_model(config)
+    Raises when the provider is not registered as an OpenAI-compatible backend
+    (no base URL or no ``extra_body`` builder), so callers never hand ``None``
+    to :func:`create_openai_compatible_chat_model`.
+    """
+
+    spec = PROVIDER_SPECS.get(provider)
+    builder = spec.extra_body_builder if spec is not None else None
+    base_url = spec.base_url if spec is not None else None
+    placeholder = spec.placeholder_api_key if spec is not None else None
+    if builder is None or base_url is None:
+        msg = f"provider {provider!r} is not a configured OpenAI-compatible backend"
+        raise ValueError(msg)
+    return base_url, builder, placeholder
+
+
+def _is_compatible_provider(provider: str) -> bool:
+    """Whether a provider is served through the OpenAI-compatible client."""
+
+    spec = PROVIDER_SPECS.get(provider)
+    return (
+        spec is not None
+        and spec.extra_body_builder is not None
+        and spec.base_url is not None
+    )
+
+
+def create_chat_model(config: ModelConfig):
+    """Create a LangChain chat model instance from the runtime config.
+
+    Providers registered as OpenAI-compatible (base URL + ``extra_body``
+    builder in :data:`PROVIDER_SPECS`) go through
+    :func:`create_openai_compatible_chat_model`; everything else falls back to
+    the generic :func:`init_chat_model` factory.
+    """
+
+    if _is_compatible_provider(config.provider):
+        base_url, builder, placeholder = _compatible_spec(config.provider)
+        return create_openai_compatible_chat_model(
+            config,
+            default_base_url=base_url,
+            extra_body=builder(config.output_tokens),
+            placeholder_api_key=placeholder,
+        )
 
     extra_kwargs: dict[str, Any] = {
         "temperature": config.temperature,
@@ -416,7 +529,7 @@ def create_chat_model(config: ModelConfig):
         "timeout": config.timeout,
     }
     base_url = config.base_url
-    if base_url:
+    if base_url is not None:
         extra_kwargs["base_url"] = base_url
     return init_chat_model(
         model=config.model, model_provider=config.provider, **extra_kwargs
@@ -441,7 +554,7 @@ def create_openai_compatible_chat_model(
         "extra_body": extra_body,
     }
     api_key = config.api_key or placeholder_api_key
-    if api_key:
+    if api_key is not None:
         kwargs["api_key"] = api_key
     return ChatOpenAI(**kwargs)
 
@@ -449,21 +562,24 @@ def create_openai_compatible_chat_model(
 def create_deepseek_chat_model(config: ModelConfig) -> ChatOpenAI:
     """Create a DeepSeek chat model through the OpenAI-compatible client."""
 
+    base_url, builder, placeholder = _compatible_spec("deepseek")
     return create_openai_compatible_chat_model(
         config,
-        default_base_url=DEFAULT_DEEPSEEK_BASE_URL,
-        extra_body=build_deepseek_extra_body(config.output_tokens),
+        default_base_url=base_url,
+        extra_body=builder(config.output_tokens),
+        placeholder_api_key=placeholder,
     )
 
 
 def create_ollama_chat_model(config: ModelConfig) -> ChatOpenAI:
     """Create a chat model backed by the local Ollama server."""
 
+    base_url, builder, placeholder = _compatible_spec("ollama")
     return create_openai_compatible_chat_model(
         config,
-        default_base_url=DEFAULT_OLLAMA_BASE_URL,
-        extra_body=build_ollama_extra_body(config.output_tokens),
-        placeholder_api_key=OLLAMA_PLACEHOLDER_API_KEY,
+        default_base_url=base_url,
+        extra_body=builder(config.output_tokens),
+        placeholder_api_key=placeholder,
     )
 
 

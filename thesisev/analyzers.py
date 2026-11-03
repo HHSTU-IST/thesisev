@@ -102,11 +102,24 @@ def build_statistics(
     return statistics
 
 
-def extract_keywords(document: ThesisDocument) -> list[str]:
-    """Extract simple thesis keywords from the title and top frequent terms."""
+def extract_keywords(
+    document: ThesisDocument,
+    *,
+    topic_keywords: list[str] | None = None,
+) -> list[str]:
+    """Extract simple thesis keywords from the title and top frequent terms.
+
+    ``topic_keywords`` lets a caller reuse the (relatively expensive,
+    deterministic) result of :func:`extract_topic_keywords` instead of paying
+    for it a second time in the same evaluation pass.
+    """
 
     title_tokens = normalize_topic_terms(split_title_keywords(document.title))
-    topic_tokens = extract_topic_keywords(document)
+    topic_tokens = (
+        extract_topic_keywords(document)
+        if topic_keywords is None
+        else list(topic_keywords)
+    )
     latin_terms = normalize_topic_terms(
         extract_latin_terms(build_topic_body_text(document))
     )

@@ -21,26 +21,8 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from thesisev.analyzers import (
-    annotate_section_statistics,
-    annotate_topic_relevance,
-    build_statistics,
-    detect_issue_groups,
-    extract_keywords,
-    extract_technology_details,
-    extract_technology_stack,
-    split_technology_stack,
-)
-from thesisev.commentary import generate_comment
-from thesisev.deep_review import run_deep_review
-from thesisev.llm import (
-    ENGINE_LOCAL,
-    ModelConfig,
-    build_model_config,
-    resolve_runtime,
-)
-from thesisev.models import EvaluationResult, Issue, ThesisDocument
-from thesisev.parser import load_document
+from thesisev.llm import ENGINE_LOCAL, build_model_config, resolve_runtime
+from thesisev.models import EvaluationResult
 from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
 from thesisev.rubric_utils import (
     normalize_format_requirements_payload,
@@ -49,14 +31,12 @@ from thesisev.rubric_utils import (
     parse_score_value,
 )
 from thesisev.scoring import (
-    DEFAULT_THESIS_TECH_RUBRIC,
     FORMAT_RUBRIC_BY_SCORE_RUBRIC,
-    build_content_context,
     build_format_standards,
-    calculate_score_report,
     sum_format_rule_points,
 )
 from thesisev.scoring_format import extract_format_rules, normalize_format_spec_payload
+from thesisev.service import evaluate_document, structure_document
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +207,16 @@ _JOBS: dict[str, dict[str, Any]] = {}
 
 
 def register_evaluation_job() -> dict[str, Any]:
-    """Create a queued job record and trim finished jobs beyond the cap."""
+    """Create a queued job record and enforce a hard cap on the registry.
+
+    The registry is bounded by *total* record count, not just finished ones.
+    Under a burst of uploads the bounded worker pool leaves many records in
+    ``queued``, so trimming only ``done``/``error`` jobs would let ``_JOBS``
+    grow without limit (each ``done`` record also holds a full serialized
+    result). When over capacity we drop the oldest records, preferring
+    already-finished ones before evicting live jobs; the just-inserted job is
+    never evicted.
+    """
 
     job_id = uuid.uuid4().hex
     record = {
@@ -239,11 +228,16 @@ def register_evaluation_job() -> dict[str, Any]:
     }
     with _JOB_LOCK:
         _JOBS[job_id] = record
-        finished = [
-            key for key, job in _JOBS.items() if job["status"] in {"done", "error"}
-        ]
-        for key in finished[: max(0, len(_JOBS) - MAX_JOBS)]:
-            _JOBS.pop(key, None)
+        overflow = len(_JOBS) - MAX_JOBS
+        if overflow > 0:
+            finished = [
+                key
+                for key, job in _JOBS.items()
+                if key != job_id and job["status"] in {"done", "error"}
+            ]
+            live = [key for key in _JOBS if key != job_id and key not in set(finished)]
+            for key in (finished + live)[:overflow]:
+                _JOBS.pop(key, None)
     return record
 
 
@@ -295,7 +289,7 @@ def run_evaluation_job(
             max_tokens=max_tokens,
         )
         model_config, runtime_warning = resolve_runtime(model_config)
-        if runtime_warning:
+        if bool(runtime_warning):
             logger.warning("evaluation job %s: %s", job_id, runtime_warning)
         result = evaluate_document(
             source,
@@ -358,7 +352,7 @@ def evaluate(request: EvaluateRequest) -> ApiResponse:
             max_tokens=request.max_tokens,
         )
         model_config, runtime_warning = resolve_runtime(model_config)
-        if runtime_warning:
+        if bool(runtime_warning):
             logger.warning("evaluate request: %s", runtime_warning)
         result = evaluate_document(
             source,
@@ -497,7 +491,7 @@ def resolve_preset_files(preset: str) -> tuple[str, str | None]:
     """Resolve bundled rubric filenames for a preset."""
 
     config = PRESET_CONFIGS.get(preset)
-    if not config:
+    if config is None or len(config) == 0:
         msg = f"unknown preset: {preset}"
         raise HTTPException(status_code=400, detail=msg)
     return config["rubric"], config["format"] or None
@@ -527,7 +521,7 @@ def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
     payload = parse_json_file(config_dir() / filename, name="rubric")
     items = normalize_rubric_payload(payload)
     format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(filename)
-    if format_filename and not any(
+    if format_filename is not None and not any(
         item.get("criterion") == "格式规范" for item in items
     ):
         format_spec = normalize_format_spec_payload(
@@ -558,7 +552,7 @@ def load_builtin_format_requirements_summary(
 ) -> dict[str, Any] | None:
     """Load a bundled format-requirements summary."""
 
-    if not filename:
+    if filename is None or filename == "":
         return None
     payload = parse_json_file(config_dir() / filename, name="format requirements")
     if isinstance(payload, dict) and "sections" in payload:
@@ -649,139 +643,6 @@ def run_api() -> None:
     uvicorn.run("thesisev.api:app", host="127.0.0.1", port=8000, reload=False)
 
 
-def evaluate_document(
-    path: str | Path,
-    *,
-    engine: str | None = None,
-    provider: str | None = None,
-    model: str | None = None,
-    temperature: float = 0.2,
-    max_tokens: int | None = None,
-    timeout: int = 60,
-    model_config: ModelConfig | None = None,
-    rubric_filename: str = DEFAULT_THESIS_TECH_RUBRIC,
-    rubric: dict[str, Any] | None = None,
-    format_requirements: dict[str, Any] | None = None,
-) -> EvaluationResult:
-    """Evaluate a thesis document from a local path.
-
-    ``model_config`` short-circuits the individual knobs.  When it is omitted,
-    a config is built from ``engine``/``provider``; callers that intend to run
-    a local engine should probe the runtime first (see
-    :func:`thesisev.llm.resolve_runtime`) so a stopped server degrades at once.
-    """
-
-    document = load_document(path)
-    topic_analysis = annotate_topic_relevance(document)
-    statistics = build_statistics(document, topic_analysis=dict(topic_analysis))
-    issue_groups = detect_issue_groups(document)
-    format_issues = issue_groups.format_issues
-    writing_issues = issue_groups.writing_issues
-    issues = issue_groups.all_issues
-    keywords = extract_keywords(document)
-    technology_details = extract_technology_details(document)
-    technology_stack = extract_technology_stack(document)
-    technology_groups = split_technology_stack(technology_details)
-    content_context = build_content_context(
-        document=document,
-        topic_analysis=dict(topic_analysis),
-        keywords=keywords,
-        technology_details=technology_details,
-    )
-    runtime_model_config = model_config or build_model_config(
-        engine=engine,
-        provider=provider,
-        model=model,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        timeout=timeout,
-    )
-    score_report = calculate_score_report(
-        document=document,
-        topic_analysis=dict(topic_analysis),
-        format_issues=format_issues,
-        writing_issues=writing_issues,
-        content_context=content_context,
-        keywords=keywords,
-        technology_details=technology_details,
-        format_requirements=format_requirements,
-        rubric=rubric,
-        rubric_filename=rubric_filename,
-        model_config=runtime_model_config,
-    )
-    score = score_report.score
-    comment, comment_checks, comment_source = generate_comment(
-        title=document.title,
-        keywords=keywords,
-        technology_details=technology_details,
-        topic_keywords=topic_analysis["topic_keywords"],
-        topic_relevance_ratio=topic_analysis["document_ratio"],
-        root_sections=document.root_sections,
-        model_config=runtime_model_config,
-    )
-    if runtime_model_config.is_available():
-        deep_issues = run_deep_review(
-            document=document, model_config=runtime_model_config, existing_issues=issues
-        )
-        if deep_issues:
-            issues = [*issues, *deep_issues]
-    else:
-        deep_issues: list[Issue] = []
-    return EvaluationResult(
-        document=document,
-        statistics=statistics,
-        issues=issues,
-        format_issues=format_issues,
-        writing_issues=writing_issues,
-        content_context=content_context,
-        keywords=keywords,
-        technology_stack=technology_stack,
-        software_technology_stack=technology_groups["software_technology_stack"],
-        hardware_technology_stack=technology_groups["hardware_technology_stack"],
-        technology_details=technology_details,
-        topic_keywords=topic_analysis["topic_keywords"],
-        topic_relevance_ratio=topic_analysis["document_ratio"],
-        score=score,
-        comment=comment,
-        comment_checks=comment_checks,
-        metadata={
-            "version": "0.1.0",
-            "topic_analysis": topic_analysis,
-            "score_source": score_report.score_source,
-            "score_detail": score_report.to_dict(),
-            "comment_source": comment_source,
-            "rubric": rubric,
-            "format_requirements": format_requirements,
-            "evaluation_roles": {
-                "format_detection": "local",
-                "format_evaluation": "local",
-                "writing_detection": "local",
-                "writing_evaluation": "local",
-                "logic_detection": "local",
-                "logic_deep_review": (
-                    "llm" if runtime_model_config.is_available() else "skipped"
-                ),
-                "content_evaluation": comment_source,
-                "llm_input": "content_context_only",
-            },
-            "model": runtime_model_config.to_metadata(),
-            "deep_review": {
-                "source": "llm" if runtime_model_config.is_available() else "skipped",
-                "added_count": len(deep_issues),
-            },
-        },
-    )
-
-
-def structure_document(path: str | Path) -> ThesisDocument:
-    """Load a thesis document and return only its structured representation."""
-
-    document = load_document(path)
-    annotate_section_statistics(document)
-    annotate_topic_relevance(document)
-    return document
-
-
 def append_history(result: EvaluationResult) -> None:
     """Append a compact evaluation summary to local history.
 
@@ -795,7 +656,12 @@ def append_history(result: EvaluationResult) -> None:
         items = read_history_unlocked()
         items.insert(0, build_history_entry(result))
         HISTORY_TMP_PATH.write_text(
-            json.dumps(items[:MAX_HISTORY_ITEMS], ensure_ascii=False, indent=2),
+            json.dumps(
+                items[:MAX_HISTORY_ITEMS],
+                ensure_ascii=False,
+                indent=2,
+                allow_nan=False,
+            ),
             encoding="utf-8",
         )
         HISTORY_TMP_PATH.replace(HISTORY_PATH)
@@ -808,12 +674,46 @@ def read_history() -> list[dict[str, Any]]:
         return read_history_unlocked()
 
 
+def coerce_history_entries(raw: Any) -> list[dict[str, Any]]:
+    """Keep only well-formed dict entries from a decoded history payload.
+
+    A non-list payload yields an empty list; list entries that are not dicts
+    are dropped. This is the shape guard for the persisted-history boundary.
+    """
+
+    if not isinstance(raw, list):
+        return []
+    return [entry for entry in raw if isinstance(entry, dict)]
+
+
 def read_history_unlocked() -> list[dict[str, Any]]:
-    """Read history entries without acquiring the history lock."""
+    """Read and normalize history entries without acquiring the history lock.
+
+    ``history.json`` is an external persistence boundary: it may be hand-edited,
+    left truncated by an interrupted process, or written by an older schema.
+    A malformed file must degrade to an empty/partial history rather than crash
+    the ``/history`` endpoint or break :func:`append_history`'s read-modify-write
+    (which does ``items.insert(0, ...)`` and therefore needs a real list).
+    """
 
     if not HISTORY_PATH.exists():
         return []
-    return json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+    # A genuine OSError (permissions, transient lock) is *not* swallowed: if it
+    # were, append_history would overwrite the file and drop recoverable data.
+    text = HISTORY_PATH.read_text(encoding="utf-8")
+    try:
+        raw = json.loads(text)
+    except JSONDecodeError as exc:
+        logger.warning(
+            "history file is not valid JSON (%s); treating history as empty", exc
+        )
+        return []
+    items = coerce_history_entries(raw)
+    if not isinstance(raw, list):
+        logger.warning("history file is not a JSON list; treating history as empty")
+    elif len(items) != len(raw):
+        logger.warning("dropped %d malformed history entries", len(raw) - len(items))
+    return items
 
 
 #: Metadata keys that must never reach disk.  ``api_key`` was persisted for

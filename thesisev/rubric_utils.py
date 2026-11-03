@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, cast
@@ -92,12 +93,16 @@ def parse_standards(value: Any) -> list[str]:
 
 
 def parse_score_value(value: Any) -> float:
-    """Parse a numeric score value."""
+    """Parse a numeric score value, rejecting non-finite inputs."""
 
     if isinstance(value, bool) or not isinstance(value, int | float):
         msg = "rubric score must be numeric"
         raise TypeError(msg)
-    return float(value)
+    score = float(value)
+    if not math.isfinite(score):
+        msg = "rubric score must be finite"
+        raise ValueError(msg)
+    return score
 
 
 def build_criterion(

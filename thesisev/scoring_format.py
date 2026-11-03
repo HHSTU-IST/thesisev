@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from typing import Any
+from collections.abc import Callable
+from typing import Any, TypedDict
 
 from thesisev.models import Issue, ThesisDocument
 from thesisev.resources import load_json_resource
@@ -87,7 +88,9 @@ def score_format_compliance(
         format_requirements=format_requirements,
     )
     format_count = (
-        len(format_requirements.get("items", [])) if format_requirements else 0
+        len(format_requirements.get("items", []))
+        if format_requirements is not None
+        else 0
     )
     score = max(
         0.0,
@@ -110,6 +113,93 @@ def score_format_compliance(
     return criterion
 
 
+#: Shared context handed to each format-signal handler.
+class _FormatRuleContext(TypedDict):
+    document: ThesisDocument
+    rule: dict[str, Any]
+    signal: dict[str, Any]
+    issue_categories: Counter[str]
+
+
+#: A format handler returns (matched, rule_evidence): whether the rule was
+#: violated and the human-readable evidence string for the report.
+FormatSignalHandler = Callable[[_FormatRuleContext], tuple[bool, str]]
+
+
+def _handle_word_count_range(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    signal = ctx["signal"]
+    document = ctx["document"]
+    min_words = parse_optional_float(signal.get("min"))
+    max_words = parse_optional_float(signal.get("max"))
+    word_count = document.total_word_count
+    evidence = f"{ctx['rule']['label']}: {word_count} 字"
+    matched = (min_words is not None and word_count < min_words) or (
+        max_words is not None and word_count > max_words
+    )
+    return matched, evidence
+
+
+def _handle_section_count_min(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    signal = ctx["signal"]
+    document = ctx["document"]
+    min_sections = parse_optional_float(signal.get("min")) or 0
+    section_count = len(document.sections)
+    evidence = f"{ctx['rule']['label']}: {section_count} 个章节"
+    return section_count < min_sections, evidence
+
+
+def _handle_text_contains_any(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    signal = ctx["signal"]
+    document = ctx["document"]
+    terms = normalize_string_list(signal.get("terms", []))
+    matched_terms = [term for term in terms if term in document.cleaned_text]
+    matched_display = "，".join(matched_terms) if matched_terms else "未命中"
+    evidence = f"{ctx['rule']['label']}: {matched_display}"
+    return not matched_terms, evidence
+
+
+def _handle_issue_category(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    signal = ctx["signal"]
+    categories = normalize_string_list(signal.get("categories", []))
+    hit_count = sum(ctx["issue_categories"].get(category, 0) for category in categories)
+    evidence = f"{ctx['rule']['label']}: {hit_count} 项问题"
+    return hit_count > 0, evidence
+
+
+def _handle_text_term_count_min(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    signal = ctx["signal"]
+    document = ctx["document"]
+    terms = normalize_string_list(signal.get("terms", []))
+    min_hits = parse_optional_float(signal.get("min")) or 0
+    hit_count = count_terms(document.cleaned_text, tuple(terms))
+    evidence = f"{ctx['rule']['label']}: {hit_count} 次关键词命中"
+    return hit_count < min_hits, evidence
+
+
+def _handle_manual_review(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    return False, f"{ctx['rule']['label']}: 需人工核对"
+
+
+def _handle_docx_expected(ctx: _FormatRuleContext) -> tuple[bool, str]:
+    verdict, evidence = evaluate_docx_expected_rule(ctx["document"], ctx["rule"])
+    if verdict is None:
+        return False, f"{evidence}；无法自动判定，需人工核对"
+    return not verdict, evidence
+
+
+#: Registry mapping each ``signal_type`` to its handler. Adding a new format
+#: check means defining one handler and one entry here — no growing if/elif.
+FORMAT_SIGNAL_HANDLERS: dict[str, FormatSignalHandler] = {
+    "word_count_range": _handle_word_count_range,
+    "section_count_min": _handle_section_count_min,
+    "text_contains_any": _handle_text_contains_any,
+    "issue_category": _handle_issue_category,
+    "text_term_count_min": _handle_text_term_count_min,
+    "manual_review": _handle_manual_review,
+    "docx_expected": _handle_docx_expected,
+}
+
+
 def score_format_rules(
     *,
     document: ThesisDocument,
@@ -129,55 +219,21 @@ def score_format_rules(
     for rule in rules:
         signal = normalize_rule_check(rule)
         signal_type = str(signal.get("type", "")).strip()
-        matched = False
-        rule_evidence = ""
         suggestion = build_rule_suggestion(rule)
 
-        if signal_type == "word_count_range":
-            min_words = parse_optional_float(signal.get("min"))
-            max_words = parse_optional_float(signal.get("max"))
-            word_count = document.total_word_count
-            rule_evidence = f"{rule['label']}: {word_count} 字"
-            matched = (min_words is not None and word_count < min_words) or (
-                max_words is not None and word_count > max_words
-            )
-        elif signal_type == "section_count_min":
-            min_sections = parse_optional_float(signal.get("min")) or 0
-            section_count = len(document.sections)
-            rule_evidence = f"{rule['label']}: {section_count} 个章节"
-            matched = section_count < min_sections
-        elif signal_type == "text_contains_any":
-            terms = normalize_string_list(signal.get("terms", []))
-            matched_terms = [term for term in terms if term in document.cleaned_text]
-            matched_display = "，".join(matched_terms) if matched_terms else "未命中"
-            rule_evidence = f"{rule['label']}: {matched_display}"
-            matched = not matched_terms
-        elif signal_type == "issue_category":
-            categories = normalize_string_list(signal.get("categories", []))
-            hit_count = sum(
-                issue_categories.get(category, 0) for category in categories
-            )
-            rule_evidence = f"{rule['label']}: {hit_count} 项问题"
-            matched = hit_count > 0
-        elif signal_type == "text_term_count_min":
-            terms = normalize_string_list(signal.get("terms", []))
-            min_hits = parse_optional_float(signal.get("min")) or 0
-            hit_count = count_terms(document.cleaned_text, tuple(terms))
-            rule_evidence = f"{rule['label']}: {hit_count} 次关键词命中"
-            matched = hit_count < min_hits
-        elif signal_type == "manual_review":
-            rule_evidence = f"{rule['label']}: 需人工核对"
-            matched = False
-        elif signal_type == "docx_expected":
-            verdict, rule_evidence = evaluate_docx_expected_rule(document, rule)
-            if verdict is None:
-                rule_evidence = f"{rule_evidence}；无法自动判定，需人工核对"
-                matched = False
-            else:
-                matched = not verdict
-        else:
+        handler = FORMAT_SIGNAL_HANDLERS.get(signal_type)
+        if handler is None:
             rule_evidence = f"{rule['label']}: 未定义检查类型，需人工核对"
             matched = False
+        else:
+            matched, rule_evidence = handler(
+                {
+                    "document": document,
+                    "rule": rule,
+                    "signal": signal,
+                    "issue_categories": issue_categories,
+                }
+            )
 
         expected_lines = format_expected_items(get_rule_expected(rule))
         expected_text = "；".join(expected_lines)
@@ -197,7 +253,7 @@ def score_format_rules(
             if suggestion:
                 suggestions.append(str(suggestion))
 
-    if format_requirements:
+    if format_requirements is not None and len(format_requirements) > 0:
         evidence.append("已读取内置格式要求，可用于人工复核")
 
     return {
@@ -439,7 +495,11 @@ def collect_docx_rule_paragraphs(
         [paragraph for paragraph in paragraphs if isinstance(paragraph, dict)]
     )
     wanted = [*scope_styles]
-    if style_expected and style_expected not in wanted:
+    if (
+        style_expected is not None
+        and style_expected != ""
+        and style_expected not in wanted
+    ):
         wanted.append(style_expected)
     if wanted:
         wanted_tokens = {normalize_docx_expected_token(style) for style in wanted}
