@@ -471,6 +471,8 @@ def extract_response_text(response: Any) -> str:
             elif isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
         return "".join(parts)
+    if content is None:
+        return ""
     return str(content)
 
 
@@ -852,12 +854,28 @@ def load_provider_settings() -> dict[str, ProviderSettings]:
     """Load provider credentials and endpoints from the bundled TOML config."""
 
     config_path = config_dir() / "provider_env.toml"
-    with config_path.open("rb") as file:
-        config = tomllib.load(file)
+    try:
+        with config_path.open("rb") as file:
+            config = tomllib.load(file)
+    except (FileNotFoundError, OSError, tomllib.TOMLDecodeError) as exc:
+        logger.warning(
+            "provider config unreadable at %s; running without provider settings: %s",
+            config_path,
+            exc,
+        )
+        return {}
 
     providers = config.get("providers", {})
     settings: dict[str, ProviderSettings] = {}
+    if not isinstance(providers, dict):
+        logger.warning(
+            "provider config at %s has a non-mapping [providers] table; ignoring",
+            config_path,
+        )
+        return settings
     for provider, values in providers.items():
+        if not isinstance(values, dict):
+            continue
         settings[provider] = ProviderSettings(
             api_key_env=_as_optional_str(values.get("api_key_env")),
             api_key=_as_optional_str(values.get("api_key")),

@@ -19,12 +19,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from thesisev.llm import ENGINE_LOCAL, build_model_config, resolve_runtime
 from thesisev.models import EvaluationResult
-from thesisev.paths import config_dir, data_dir, project_root, static_dir, templates_dir
+from thesisev.paths import data_dir, project_root, static_dir, templates_dir
+from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import (
+    FORMAT_RUBRIC_KEY,
+    FORMAT_RUBRIC_NAME,
     normalize_format_requirements_payload,
     normalize_rubric_payload,
     normalize_structured_format_requirements,
@@ -36,7 +40,11 @@ from thesisev.scoring import (
     sum_format_rule_points,
 )
 from thesisev.scoring_format import extract_format_rules, normalize_format_spec_payload
-from thesisev.service import evaluate_document, structure_document
+from thesisev.service import (
+    evaluate_document,
+    resolve_preset_files,
+    structure_document,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -186,13 +194,6 @@ EVALUATE_UPLOAD_PROVIDER_DEFAULT = Form(default=None)
 EVALUATE_UPLOAD_MODEL_DEFAULT = Form(default=None)
 EVALUATE_UPLOAD_TEMPERATURE_DEFAULT = Form(default=0.2)
 EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=None)
-
-PRESET_CONFIGS: dict[str, dict[str, str]] = {
-    "thesis_tech": {
-        "rubric": "score_thesis_tech.json",
-        "format": "score_thesis_tech_f.json",
-    },
-}
 
 #: In-process background evaluation queue.  Uploads return a ``job_id``
 #: immediately and the blocking parse + LLM pipeline runs on a bounded
@@ -367,7 +368,10 @@ def evaluate(request: EvaluateRequest) -> ApiResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("evaluate request failed")
+        raise HTTPException(
+            status_code=500, detail="evaluation failed; see server logs"
+        ) from exc
     append_history(result)
     return ApiResponse(ok=True, mode="evaluate", data=result.to_dict())
 
@@ -382,7 +386,10 @@ def structure(request: StructureRequest) -> ApiResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("structure request failed")
+        raise HTTPException(
+            status_code=500, detail="structuring failed; see server logs"
+        ) from exc
     return ApiResponse(ok=True, mode="structure", data=document.to_dict())
 
 
@@ -487,16 +494,6 @@ def validate_rubric_suffix(suffix: str) -> None:
         raise HTTPException(status_code=400, detail=msg)
 
 
-def resolve_preset_files(preset: str) -> tuple[str, str | None]:
-    """Resolve bundled rubric filenames for a preset."""
-
-    config = PRESET_CONFIGS.get(preset)
-    if config is None or len(config) == 0:
-        msg = f"unknown preset: {preset}"
-        raise HTTPException(status_code=400, detail=msg)
-    return config["rubric"], config["format"] or None
-
-
 async def resolve_thesis_source(file: UploadFile | None) -> Path:
     """Resolve the thesis source path from the current upload."""
 
@@ -518,21 +515,19 @@ def load_builtin_rubric_summary(filename: str) -> dict[str, Any]:
     engine's ``raw_total`` (which already includes the format criterion).
     """
 
-    payload = parse_json_file(config_dir() / filename, name="rubric")
+    payload = load_json_resource(filename)
     items = normalize_rubric_payload(payload)
     format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(filename)
     if format_filename is not None and not any(
-        item.get("criterion") == "格式规范" for item in items
+        item.get("criterion") == FORMAT_RUBRIC_NAME for item in items
     ):
-        format_spec = normalize_format_spec_payload(
-            parse_json_file(config_dir() / format_filename, name="format rubric")
-        )
+        format_spec = normalize_format_spec_payload(load_json_resource(format_filename))
         rules = extract_format_rules(format_spec)
         items = [
             *items,
             {
-                "criterion": "格式规范",
-                "key": "format",
+                "criterion": FORMAT_RUBRIC_NAME,
+                "key": FORMAT_RUBRIC_KEY,
                 "standard": build_format_standards(rules),
                 "score": sum_format_rule_points(rules),
                 "evaluation": "local",
@@ -554,7 +549,7 @@ def load_builtin_format_requirements_summary(
 
     if filename is None or filename == "":
         return None
-    payload = parse_json_file(config_dir() / filename, name="format requirements")
+    payload = load_json_resource(filename)
     if isinstance(payload, dict) and "sections" in payload:
         return normalize_structured_format_requirements(payload, source_name=filename)
     if isinstance(payload, list):
@@ -579,12 +574,13 @@ async def store_upload_file(
     if validate_json_suffix:
         validate_rubric_suffix(suffix)
 
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    await run_in_threadpool(UPLOAD_DIR.mkdir, parents=True, exist_ok=True)
     temp_path = UPLOAD_DIR / f".upload_{slot}_{uuid.uuid4().hex}{suffix}.tmp"
     stored_path = UPLOAD_DIR / f"{slot}_{uuid.uuid4().hex}{suffix}"
     written = 0
     try:
-        with temp_path.open("wb") as output:
+        output = await run_in_threadpool(lambda: temp_path.open("wb"))
+        try:
             while chunk := await file.read(UPLOAD_READ_CHUNK_BYTES):
                 next_written = written + len(chunk)
                 if next_written > MAX_EVALUATE_UPLOAD_BYTES:
@@ -592,14 +588,16 @@ async def store_upload_file(
                         status_code=413, detail=build_upload_too_large_message()
                     )
                 written = next_written
-                output.write(chunk)
+                await run_in_threadpool(output.write, chunk)
+        finally:
+            await run_in_threadpool(output.close)
         if written == 0:
             msg = f"{slot.replace('_', ' ')} file is empty"
             raise ValueError(msg)
 
-        temp_path.replace(stored_path)
+        await run_in_threadpool(temp_path.replace, stored_path)
     finally:
-        temp_path.unlink(missing_ok=True)
+        await run_in_threadpool(temp_path.unlink, missing_ok=True)
 
     return stored_path
 
@@ -622,19 +620,6 @@ def build_upload_too_large_message() -> str:
 
     max_mib = MAX_EVALUATE_UPLOAD_BYTES // (1024 * 1024)
     return f"uploaded thesis file is too large; maximum size is {max_mib} MiB"
-
-
-def parse_json_file(path: Path, *, name: str) -> Any:
-    """Parse a persisted UTF-8 JSON file."""
-
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except UnicodeDecodeError as exc:
-        msg = f"{name} JSON must be utf-8 encoded"
-        raise ValueError(msg) from exc
-    except JSONDecodeError as exc:
-        msg = f"{name} JSON is invalid"
-        raise ValueError(msg) from exc
 
 
 def run_api() -> None:

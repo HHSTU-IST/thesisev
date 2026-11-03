@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 from thesisev.analyzers import split_technology_stack
-from thesisev.api import evaluate_document, resolve_preset_files, structure_document
 from thesisev.llm import (
     ENGINE_LOCAL,
     ENGINE_REMOTE,
@@ -21,6 +20,11 @@ from thesisev.models import (
     Section,
     TechnologyStackItem,
     ThesisDocument,
+)
+from thesisev.service import (
+    evaluate_document,
+    resolve_preset_files,
+    structure_document,
 )
 
 

@@ -47,6 +47,11 @@ class RubricItem:
 
 FORMAT_RUBRIC_KEY = "format"
 
+#: Display name of the built-in format-compliance rubric item. Rubrics that have
+#: no ``key`` fall back to matching on this label, so it is an identity marker,
+#: not just prose -- keep it in sync with the bundled config's ``criterion``.
+FORMAT_RUBRIC_NAME = "格式规范"
+
 #: Stable keys for built-in thesis rubric items. Aliases (译文/英文摘要) map to
 #: the same key so scorer dispatch never depends on a single Chinese label.
 KNOWN_RUBRIC_KEYS: dict[str, str] = {
@@ -92,17 +97,40 @@ def parse_standards(value: Any) -> list[str]:
     return [str(value).strip()] if str(value).strip() else []
 
 
+def coerce_finite_number(value: Any, *, field: str) -> float:
+    """Coerce a numeric-or-numeric-string value into a finite float.
+
+    Accepts ``int``/``float`` directly and tolerates the numeric strings an LLM
+    commonly emits (``"8"``, ``"8.5"``, ``"8分"``) by extracting the first
+    number. Booleans, missing values, unparseable text, and non-finite results
+    still raise, so callers degrade deterministically rather than propagating a
+    corrupt number into the score.
+    """
+
+    if isinstance(value, bool):
+        msg = f"{field} must be numeric"
+        raise TypeError(msg)
+    if isinstance(value, int | float):
+        number = float(value)
+    elif isinstance(value, str):
+        match = re.search(r"-?\d+(?:\.\d+)?", value.strip())
+        if match is None:
+            msg = f"{field} must be numeric"
+            raise ValueError(msg)
+        number = float(match.group(0))
+    else:
+        msg = f"{field} must be numeric"
+        raise TypeError(msg)
+    if not math.isfinite(number):
+        msg = f"{field} must be finite"
+        raise ValueError(msg)
+    return number
+
+
 def parse_score_value(value: Any) -> float:
     """Parse a numeric score value, rejecting non-finite inputs."""
 
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        msg = "rubric score must be numeric"
-        raise TypeError(msg)
-    score = float(value)
-    if not math.isfinite(score):
-        msg = "rubric score must be finite"
-        raise ValueError(msg)
-    return score
+    return coerce_finite_number(value, field="rubric score")
 
 
 def build_criterion(

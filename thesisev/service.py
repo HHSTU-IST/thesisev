@@ -33,7 +33,33 @@ from thesisev.scoring import (
     calculate_score_report,
 )
 
-__all__ = ["evaluate_document", "structure_document"]
+__all__ = ["evaluate_document", "resolve_preset_files", "structure_document"]
+
+
+#: Bundled rubric/format filenames per scoring preset.  Kept here (not in the
+#: transport layer) so both the HTTP API and the CLI resolve presets from one
+#: framework-free source of truth.
+PRESET_CONFIGS: dict[str, dict[str, str]] = {
+    "thesis_tech": {
+        "rubric": "score_thesis_tech.json",
+        "format": "score_thesis_tech_f.json",
+    },
+}
+
+
+def resolve_preset_files(preset: str) -> tuple[str, str | None]:
+    """Resolve bundled rubric filenames for a preset.
+
+    Raises ``ValueError`` for an unknown or empty preset; the HTTP adapter
+    translates that into a ``400`` while the CLI lets it surface as a plain
+    usage error.
+    """
+
+    config = PRESET_CONFIGS.get(preset)
+    if config is None or len(config) == 0:
+        msg = f"unknown preset: {preset}"
+        raise ValueError(msg)
+    return config["rubric"], config["format"] or None
 
 
 def evaluate_document(

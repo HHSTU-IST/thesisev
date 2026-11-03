@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -50,7 +51,14 @@ EDGE_PARTICLE_CHARS = "的与及和并且或者以及在对将把为是中上下
 EDGE_PARTICLES_PATTERN = re.compile(
     rf"\A[{EDGE_PARTICLE_CHARS}]+|[{EDGE_PARTICLE_CHARS}]+\Z"
 )
-TIKTOKEN_ENCODING = tiktoken.get_encoding("cl100k_base")
+TIKTOKEN_ENCODING_NAME = "cl100k_base"
+
+
+@functools.cache
+def tiktoken_encoding() -> tiktoken.Encoding:
+    """Return the tiktoken encoding, built once and only on first use."""
+
+    return tiktoken.get_encoding(TIKTOKEN_ENCODING_NAME)
 
 
 @dataclass(slots=True)
@@ -537,8 +545,9 @@ def build_tiktoken_text_chunks(text: str, max_tokens: int = 48) -> list[str]:
     current_parts: list[str] = []
     current_token_count = 0
 
+    encoding = tiktoken_encoding()
     for segment in raw_segments:
-        segment_token_count = len(TIKTOKEN_ENCODING.encode(segment))
+        segment_token_count = len(encoding.encode(segment))
         if current_parts and current_token_count + segment_token_count > max_tokens:
             chunks.append("，".join(current_parts))
             current_parts = []

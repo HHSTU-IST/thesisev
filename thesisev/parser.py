@@ -714,6 +714,7 @@ def resolve_docx_style_snapshot(
         "bold": style.get("bold")
         if style.get("bold") is not None
         else base.get("bold"),
+        "alignment": style.get("alignment") or base.get("alignment"),
         "line_spacing": style.get("line_spacing") or base.get("line_spacing"),
         "space_before_pt": style.get("space_before_pt")
         if style.get("space_before_pt") is not None

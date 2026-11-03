@@ -633,9 +633,7 @@ def test_local_providers_are_derived_from_the_spec_table() -> None:
 def test_base_url_table_matches_specs_and_wire_defaults() -> None:
     specs = llm_module.PROVIDER_SPECS
     expected = {
-        name: spec.base_url
-        for name, spec in specs.items()
-        if spec.base_url is not None
+        name: spec.base_url for name, spec in specs.items() if spec.base_url is not None
     }
     assert expected == llm_module.DEFAULT_BASE_URLS
     assert specs["ollama"].base_url == llm_module.DEFAULT_OLLAMA_BASE_URL

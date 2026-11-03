@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 def project_root() -> Path:
     """Return the active project root for source or installed usage."""
 
+    override = os.environ.get("THESEISEV_HOME")
+    if override:
+        return Path(override).expanduser().resolve()
     cwd = Path.cwd().resolve()
     if (cwd / "pyproject.toml").exists() and (cwd / "thesisev").is_dir():
         return cwd

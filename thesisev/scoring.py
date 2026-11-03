@@ -20,6 +20,7 @@ from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import (
     FORMAT_RUBRIC_KEY,
+    FORMAT_RUBRIC_NAME,
     RubricItem,
     ScoreCriterion,
     build_criterion,
@@ -372,7 +373,7 @@ def score_item_locally(
     scorer = LOCAL_SCORERS.get(key)
     if scorer is not None:
         return scorer(ctx)
-    if key == FORMAT_RUBRIC_KEY or rubric_item.name == "格式规范":
+    if key == FORMAT_RUBRIC_KEY or rubric_item.name == FORMAT_RUBRIC_NAME:
         format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
         if format_filename is None:
             return build_criterion(
@@ -383,13 +384,29 @@ def score_item_locally(
                 deductions=["缺少格式规范文件映射"],
                 suggestions=["为该预设补充格式规范文件"],
             )
-        return score_format_compliance(
-            document=document,
-            format_issues=format_issues,
-            format_requirements=format_requirements,
-            rubric_item=rubric_item,
-            format_filename=format_filename,
-        )
+        try:
+            return score_format_compliance(
+                document=document,
+                format_issues=format_issues,
+                format_requirements=format_requirements,
+                rubric_item=rubric_item,
+                format_filename=format_filename,
+            )
+        except Exception as exc:  # noqa: BLE001 - malformed spec degrades one item
+            logger.warning(
+                "format scoring failed (file=%s rubric=%s); degrading format item: %s",
+                format_filename,
+                rubric_filename,
+                exc,
+            )
+            return build_criterion(
+                key=FORMAT_RUBRIC_KEY,
+                rubric_item=rubric_item,
+                score=0,
+                evidence=["格式规范自动评分失败，需人工核对"],
+                deductions=["格式规范无法自动判定"],
+                suggestions=["检查格式规范 JSON 配置或进行人工复核"],
+            )
     return build_criterion(
         key=key,
         rubric_item=rubric_item,
@@ -732,7 +749,7 @@ def append_builtin_format_rubric_item(
 ) -> list[RubricItem]:
     """Append built-in format scoring derived from the paired format JSON."""
 
-    if any(item.name == "格式规范" for item in items):
+    if any(item.name == FORMAT_RUBRIC_NAME for item in items):
         return items
     format_filename = FORMAT_RUBRIC_BY_SCORE_RUBRIC.get(rubric_filename)
     if format_filename is None:
@@ -749,7 +766,7 @@ def build_format_rubric_item(format_filename: str) -> RubricItem:
         msg = f"format rubric rules are empty: {format_filename}"
         raise ValueError(msg)
     return RubricItem(
-        name="格式规范",
+        name=FORMAT_RUBRIC_NAME,
         standards=build_format_standards(rules),
         evaluation="local",
         max_score=sum_format_rule_points(rules),

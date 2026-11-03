@@ -111,3 +111,27 @@ def test_rule_reporting_preserves_expected_spec_text():
     joined_evidence = "；".join(summary["evidence"])
     # Every scored rule must state what it expects, even when compliant.
     assert "宋体" in joined_evidence
+
+
+def test_unusable_expected_items_return_none_not_silent_pass():
+    """P1 regression: empty / non-dict expected must degrade to manual review.
+
+    Previously an empty expected list fell through and was treated as satisfied,
+    silently awarding the points. The guard now yields a ``None`` verdict.
+    """
+    rule = {
+        "id": "orphan",
+        "label": "孤立规则",
+        "check": {"expected": ["not-a-dict", 42]},
+    }
+    verdict, evidence = evaluate_docx_expected_rule(_doc_with([]), rule)
+    assert verdict is None
+    assert "需人工核对" in evidence
+
+
+def test_non_list_expected_returns_false():
+    """P1 regression: a malformed (non-list) expected payload is a hard failure."""
+    rule = {"id": "broken", "label": "坏规则", "check": {"expected": "oops"}}
+    verdict, evidence = evaluate_docx_expected_rule(_doc_with([]), rule)
+    assert verdict is False
+    assert "格式无效" in evidence

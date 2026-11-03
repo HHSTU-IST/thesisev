@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from typing import Any
@@ -16,6 +17,8 @@ from thesisev.llm import (
 )
 from thesisev.models import Section, TechnologyStackItem
 from thesisev.terms import COMMENT_KEYWORD_NOISE_TERMS, GENERIC_TITLE_TERMS
+
+logger = logging.getLogger(__name__)
 
 
 def generate_comment(
@@ -96,7 +99,8 @@ def generate_comment_with_llm(
                 HumanMessage(content=prompt),
             ],
         )
-    except Exception:  # noqa: BLE001 - any LLM failure falls back to the template
+    except Exception as exc:  # noqa: BLE001 - any LLM failure falls back to the template
+        logger.warning("comment llm generation failed; using local template: %s", exc)
         return fallback, "fallback"
 
     content = extract_response_text(response).strip()

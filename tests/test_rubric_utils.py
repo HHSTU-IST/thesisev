@@ -153,3 +153,31 @@ def test_parse_score_value_rejects_non_finite():
         parse_score_value(float("-inf"))
     with pytest.raises(TypeError):
         parse_score_value(True)
+
+
+def test_parse_score_value_coerces_numeric_strings():
+    """P1 regression: lenient numeric strings the LLM emits must parse."""
+
+    from thesisev.rubric_utils import parse_score_value
+
+    assert parse_score_value("8") == 8.0
+    assert parse_score_value("8.5") == 8.5
+    assert parse_score_value(" 8分 ") == 8.0
+    assert parse_score_value("得8.5分") == 8.5
+
+
+def test_coerce_finite_number_rejects_non_scalar():
+    """P1 regression: non-numeric / non-scalar inputs degrade deterministically."""
+
+    import pytest
+
+    from thesisev.rubric_utils import coerce_finite_number
+
+    with pytest.raises(TypeError):
+        coerce_finite_number(None, field="x")
+    with pytest.raises(TypeError):
+        coerce_finite_number([8], field="x")
+    with pytest.raises(TypeError):
+        coerce_finite_number(True, field="x")
+    with pytest.raises(ValueError):
+        coerce_finite_number("no digits", field="x")

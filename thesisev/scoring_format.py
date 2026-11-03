@@ -15,6 +15,7 @@ from thesisev.rubric_utils import (
     RubricItem,
     ScoreCriterion,
     build_criterion,
+    coerce_finite_number,
 )
 from thesisev.scoring_content import count_terms
 
@@ -337,6 +338,8 @@ def evaluate_docx_expected_rule(
         return False, f"{rule['label']}: 期望项格式无效"
 
     expected = [item for item in expected_items if isinstance(item, dict)]
+    if not expected:
+        return None, f"{rule['label']}: 无可判定的期望项，需人工核对"
     if any(_is_paragraph_expected_path(item) for item in expected):
         return evaluate_docx_paragraph_rule(snapshot, rule, expected, check)
     return evaluate_docx_single_target_rule(snapshot, rule, expected)
@@ -865,10 +868,7 @@ def get_rule_expected(rule: dict[str, Any]) -> Any:
 def parse_float_value(value: Any) -> float:
     """Parse a numeric value with validation."""
 
-    if isinstance(value, bool) or not isinstance(value, int | float):
-        msg = "numeric format rubric value required"
-        raise TypeError(msg)
-    return float(value)
+    return coerce_finite_number(value, field="numeric format rubric value")
 
 
 def normalize_format_spec_payload(payload: Any) -> dict[str, Any]:
