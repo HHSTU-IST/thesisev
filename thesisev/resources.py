@@ -13,11 +13,12 @@ from thesisev.paths import config_dir
 
 @cache
 def _load_json_at_path(resource_path: Path) -> Any:
-    """Parse and cache a JSON file keyed by its *resolved* path.
+    """Parse and cache a JSON file, keyed by the full path passed in.
 
-    Keying on the resolved path (not the bare filename) means a change to the
-    active project root re-reads the correct file rather than serving stale
-    content from the cache.
+    The key is the active config directory joined with the filename. Because
+    ``config_dir()`` resolves the project root at call time, a change to the
+    active root yields a different key and re-reads the correct file rather than
+    serving stale content from the cache.
     """
 
     with resource_path.open(encoding="utf-8") as file:

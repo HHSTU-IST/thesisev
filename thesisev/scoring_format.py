@@ -19,14 +19,17 @@ from thesisev.rubric_utils import (
     parse_string_list,
 )
 from thesisev.scoring_content import count_terms
+from thesisev.settings import get_float
 
 #: The format score keeps a floor: at most this fraction of an item's max score
 #: may be deducted, so a paper is never zeroed out purely on formatting.
-MAX_FORMAT_DEDUCTION_RATIO = 0.8
+#: Tunable via ``[scoring_format] max_format_deduction_ratio``.
+MAX_FORMAT_DEDUCTION_RATIO = get_float("scoring_format", "max_format_deduction_ratio")
 
 #: Upper bound on the penalty any single format rule contributes, so one
 #: misconfigured weight cannot dominate the whole format criterion.
-MAX_RULE_PENALTY = 3.0
+#: Tunable via ``[scoring_format] max_rule_penalty``.
+MAX_RULE_PENALTY = get_float("scoring_format", "max_rule_penalty")
 
 
 def deduplicate_preserving_order(values: list[str]) -> list[str]:
@@ -319,7 +322,11 @@ def format_expected_items(value: Any) -> list[str]:
 
 
 _PARAGRAPH_PATH_PREFIXES = ("paragraph.", "run.", "paragraph_format.")
-DOCX_PARAGRAPH_COMPLIANCE_RATIO = 0.95
+#: Compliance ratio threshold for paragraph-level docx expectations.  Tunable
+#: via ``[scoring_format] docx_paragraph_compliance_ratio``.
+DOCX_PARAGRAPH_COMPLIANCE_RATIO = get_float(
+    "scoring_format", "docx_paragraph_compliance_ratio"
+)
 
 
 def evaluate_docx_expected_rule(

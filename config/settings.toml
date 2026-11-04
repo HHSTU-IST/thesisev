@@ -1,0 +1,51 @@
+# Tunable numeric operating knobs for the thesisev pipeline.
+#
+# Every value here mirrors the built-in default in ``thesisev/settings.py``
+# (DEFAULTS), which in turn reproduces the literals that used to be hard-coded
+# in each module.  Editing a value retunes behaviour without touching code;
+# deleting a key -- or this whole file -- makes that knob fall back to its
+# default with a warning.  Only plain numeric tuning knobs belong here;
+# regular expressions, labels, category names and derived paths stay in code.
+
+[api]
+max_history_items = 20
+max_upload_bytes = 20_971_520        # 20 * 1024 * 1024
+upload_read_chunk_bytes = 1_048_576  # 1 * 1024 * 1024
+evaluate_max_workers = 2
+max_jobs = 20
+
+[llm]
+fallback_max_tokens = 400
+min_recommended_local_context = 16384
+
+[deep_review]
+default_max_findings = 6
+section_excerpt_limit = 320
+max_sections_in_prompt = 30
+
+[scoring]
+max_context_sections = 20
+section_excerpt_limit = 600
+abstract_excerpt_limit = 1200
+
+[scoring_format]
+max_format_deduction_ratio = 0.8
+max_rule_penalty = 3.0
+docx_paragraph_compliance_ratio = 0.95
+
+[parser]
+max_archive_bytes = 26_214_400           # 25 * 1024 * 1024
+max_member_count = 512
+max_total_uncompressed_bytes = 83_886_080  # 80 * 1024 * 1024
+max_member_bytes = 31_457_280            # 30 * 1024 * 1024
+max_compression_ratio = 100
+max_text_paragraphs = 5000
+max_snapshot_paragraphs = 5000
+max_snapshot_tables = 500
+max_snapshot_sections = 200
+max_runs_per_paragraph = 500
+
+[logic_review]
+min_sections_for_logic = 3
+min_claims_for_consistency = 4
+max_consistency_issues = 8

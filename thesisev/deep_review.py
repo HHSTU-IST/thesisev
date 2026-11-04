@@ -25,6 +25,7 @@ from thesisev.llm import (
     invoke_chat_model_with_retry,
 )
 from thesisev.models import Issue, ThesisDocument
+from thesisev.settings import get_int
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,11 @@ CATEGORY_LOGIC = "逻辑问题"
 CATEGORY_TONE = "口语化表达"
 SUPPORTED_TYPES = {"logic", "tone"}
 SEVERITIES = {"low", "medium", "high"}
-DEFAULT_MAX_FINDINGS = 6
-SECTION_EXCERPT_LIMIT = 320
-MAX_SECTIONS_IN_PROMPT = 30
+#: Deep-review prompt/evidence budgets.  Tunable from the ``[deep_review]``
+#: table in ``config/settings.toml``.
+DEFAULT_MAX_FINDINGS = get_int("deep_review", "default_max_findings")
+SECTION_EXCERPT_LIMIT = get_int("deep_review", "section_excerpt_limit")
+MAX_SECTIONS_IN_PROMPT = get_int("deep_review", "max_sections_in_prompt")
 
 
 def run_deep_review(
@@ -68,7 +71,7 @@ def run_deep_review(
         )
         payload = parse_deep_review_json(response)
         findings = normalize_deep_review_findings(payload)
-    except Exception as exc:  # deep review is optional, degrade to []
+    except Exception as exc:  # noqa: BLE001 - deep review is optional, degrade to []
         logger.warning("deep review skipped after LLM failure: %s", exc)
         return []
     deep_issues = [

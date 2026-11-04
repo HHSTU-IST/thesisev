@@ -46,6 +46,7 @@ from thesisev.scoring_format import (
     parse_float_value,
     score_format_compliance,
 )
+from thesisev.settings import get_int
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,13 @@ DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
 FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
     "score_thesis_tech.json": "score_thesis_tech_f.json",
 }
+
+#: Prompt-evidence budgets: how much document text may reach the LLM scoring
+#: prompt, kept bounded so scoring stays within context limits.  Tunable from
+#: the ``[scoring]`` table in ``config/settings.toml``.
+MAX_CONTEXT_SECTIONS = get_int("scoring", "max_context_sections")
+SECTION_EXCERPT_LIMIT = get_int("scoring", "section_excerpt_limit")
+ABSTRACT_EXCERPT_LIMIT = get_int("scoring", "abstract_excerpt_limit")
 
 
 #: Bundle of everything a local content scorer may need. Keeping one context
@@ -234,7 +242,7 @@ def score_rubric_items(
                         model=shared_model,
                     )
                 )
-            except Exception as exc:  # degrade one item, never fail the review
+            except Exception as exc:  # noqa: BLE001 - degrade one item, never fail the review
                 logger.warning(
                     "llm scoring failed for %s (rubric=%s); falling back to local: %s",
                     item.name,
@@ -393,7 +401,7 @@ def score_item_locally(
                 rubric_item=rubric_item,
                 format_filename=format_filename,
             )
-        except Exception as exc:  # malformed spec degrades one item
+        except Exception as exc:  # noqa: BLE001 - malformed spec degrades one item
             logger.warning(
                 "format scoring failed (file=%s rubric=%s); degrading format item: %s",
                 format_filename,
@@ -477,9 +485,11 @@ def build_content_context(
             "level": section.level,
             "title": section.title,
             "word_count": section.word_count,
-            "excerpt": truncate_context_text(section.content, limit=600),
+            "excerpt": truncate_context_text(
+                section.content, limit=SECTION_EXCERPT_LIMIT
+            ),
         }
-        for section in document.sections[:20]
+        for section in document.sections[:MAX_CONTEXT_SECTIONS]
         if not section.is_mermaid_code
     ]
     return {
@@ -487,7 +497,9 @@ def build_content_context(
         "source_type": document.source_type,
         "total_word_count": document.total_word_count,
         "section_count": len(document.sections),
-        "abstract": truncate_context_text(document.abstract, limit=1200),
+        "abstract": truncate_context_text(
+            document.abstract, limit=ABSTRACT_EXCERPT_LIMIT
+        ),
         "topic_analysis": {
             "document_ratio": topic_analysis.get("document_ratio", 0),
             "topic_keywords": topic_analysis.get("topic_keywords", []),

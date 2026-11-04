@@ -43,6 +43,7 @@ from langchain.chat_models import init_chat_model
 from langchain_openai import ChatOpenAI
 
 from thesisev.paths import config_dir
+from thesisev.settings import get_int
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,8 @@ OLLAMA_PLACEHOLDER_API_KEY = "ollama"
 #: silently degrades to the local rules, so the ``400`` default that used to sit
 #: here cost the score items *and* the whole deep review without a visible
 #: error.  Providers without an explicit budget fall back to this floor.
-FALLBACK_MAX_TOKENS = 400
+#: Tunable via ``[llm] fallback_max_tokens`` in ``config/settings.toml``.
+FALLBACK_MAX_TOKENS = get_int("llm", "fallback_max_tokens")
 
 #: DeepSeek retired the ``deepseek-chat`` / ``deepseek-reasoner`` aliases on
 #: 2026-07-24; requests to them now fail with an HTTP error.  The documented
@@ -87,7 +89,8 @@ RETIRED_DEEPSEEK_MODELS = frozenset({"deepseek-chat", "deepseek-reasoner"})
 #: card falls in the ``< 24 GiB`` tier, whose default is 4096 tokens -- close
 #: enough to this pipeline's prompt size that overflow silently discards the
 #: *front* of the conversation, system prompt included.
-MIN_RECOMMENDED_LOCAL_CONTEXT = 16384
+#: Tunable via ``[llm] min_recommended_local_context`` in ``config/settings.toml``.
+MIN_RECOMMENDED_LOCAL_CONTEXT = get_int("llm", "min_recommended_local_context")
 LOCAL_CONTEXT_ENV = "OLLAMA_CONTEXT_LENGTH"
 
 
@@ -837,7 +840,7 @@ def invoke_chat_model_with_retry(
     for attempt in range(max(1, attempts)):
         try:
             response = model.invoke(messages)
-        except Exception as exc:  # provider errors are heterogeneous
+        except Exception as exc:  # noqa: BLE001 - provider errors are heterogeneous
             last_error = exc
             if attempt + 1 < max(1, attempts):
                 time.sleep(base_delay * (2**attempt))

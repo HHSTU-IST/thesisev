@@ -45,6 +45,7 @@ from thesisev.service import (
     resolve_preset_files,
     structure_document,
 )
+from thesisev.settings import get_int
 
 logger = logging.getLogger(__name__)
 
@@ -176,10 +177,14 @@ HISTORY_DIR = data_dir()
 HISTORY_PATH = HISTORY_DIR / "history.json"
 HISTORY_TMP_PATH = HISTORY_DIR / "history.json.tmp"
 UPLOAD_DIR = HISTORY_DIR / "uploads"
-MAX_HISTORY_ITEMS = 20
-MAX_EVALUATE_UPLOAD_BYTES = 20 * 1024 * 1024
-MAX_EVALUATE_UPLOAD_BODY_BYTES = MAX_EVALUATE_UPLOAD_BYTES + 1024 * 1024
-UPLOAD_READ_CHUNK_BYTES = 1024 * 1024
+MAX_HISTORY_ITEMS = get_int("api", "max_history_items")
+MAX_EVALUATE_UPLOAD_BYTES = get_int("api", "max_upload_bytes")
+#: The multipart envelope adds framing around the file itself, so the raw
+#: request-body ceiling is the file cap plus a fixed allowance.  This overhead
+#: is protocol framing rather than a tuning knob, so it stays in code.
+UPLOAD_BODY_OVERHEAD_BYTES = 1024 * 1024
+MAX_EVALUATE_UPLOAD_BODY_BYTES = MAX_EVALUATE_UPLOAD_BYTES + UPLOAD_BODY_OVERHEAD_BYTES
+UPLOAD_READ_CHUNK_BYTES = get_int("api", "upload_read_chunk_bytes")
 _HISTORY_LOCK = threading.Lock()
 templates = Jinja2Templates(directory=str(templates_dir()))
 app.mount("/static", StaticFiles(directory=str(static_dir())), name="static")
@@ -198,8 +203,8 @@ EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=None)
 #: In-process background evaluation queue.  Uploads return a ``job_id``
 #: immediately and the blocking parse + LLM pipeline runs on a bounded
 #: thread pool so the event loop never stalls under concurrent uploads.
-EVALUATE_MAX_WORKERS = 2
-MAX_JOBS = 20
+EVALUATE_MAX_WORKERS = get_int("api", "evaluate_max_workers")
+MAX_JOBS = get_int("api", "max_jobs")
 _EVALUATE_EXECUTOR = ThreadPoolExecutor(
     max_workers=EVALUATE_MAX_WORKERS, thread_name_prefix="thesisev-eval"
 )
@@ -299,7 +304,7 @@ def run_evaluation_job(
             rubric=rubric_summary,
             format_requirements=format_summary,
         )
-    except Exception as exc:  # record any failure on the job
+    except Exception as exc:  # noqa: BLE001 - record any failure on the job
         update_evaluation_job(job_id, status="error", error=str(exc))
         return
     finally:

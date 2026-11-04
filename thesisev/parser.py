@@ -13,6 +13,7 @@ from docx.opc.exceptions import PackageNotFoundError
 from docx.oxml.ns import qn
 
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
+from thesisev.settings import get_int
 
 CHINESE_NUMERALS = "一二三四五六七八九十百千万零"
 SECTION_PATTERN = re.compile(
@@ -32,16 +33,19 @@ COVER_TITLE_PATTERNS = (
     re.compile(r"^\s*课题名称\s*[：:]\s*(?P<title>.+?)\s*$"),
     re.compile(r"^\s*(?:论文题目|题目)\s*[：:]\s*(?P<title>.+?)\s*$"),
 )
-MAX_DOCX_ARCHIVE_BYTES = 25 * 1024 * 1024
-MAX_DOCX_MEMBER_COUNT = 512
-MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = 80 * 1024 * 1024
-MAX_DOCX_MEMBER_BYTES = 30 * 1024 * 1024
-MAX_DOCX_COMPRESSION_RATIO = 100
-MAX_DOCX_TEXT_PARAGRAPHS = 5000
-MAX_DOCX_SNAPSHOT_PARAGRAPHS = 5000
-MAX_DOCX_SNAPSHOT_TABLES = 500
-MAX_DOCX_SNAPSHOT_SECTIONS = 200
-MAX_DOCX_RUNS_PER_PARAGRAPH = 500
+#: DOCX safety caps (zip-bomb guards and snapshot bounds).  Tunable from the
+#: ``[parser]`` table in ``config/settings.toml``; the values here fall back to
+#: the built-in defaults in ``thesisev.settings.DEFAULTS``.
+MAX_DOCX_ARCHIVE_BYTES = get_int("parser", "max_archive_bytes")
+MAX_DOCX_MEMBER_COUNT = get_int("parser", "max_member_count")
+MAX_DOCX_TOTAL_UNCOMPRESSED_BYTES = get_int("parser", "max_total_uncompressed_bytes")
+MAX_DOCX_MEMBER_BYTES = get_int("parser", "max_member_bytes")
+MAX_DOCX_COMPRESSION_RATIO = get_int("parser", "max_compression_ratio")
+MAX_DOCX_TEXT_PARAGRAPHS = get_int("parser", "max_text_paragraphs")
+MAX_DOCX_SNAPSHOT_PARAGRAPHS = get_int("parser", "max_snapshot_paragraphs")
+MAX_DOCX_SNAPSHOT_TABLES = get_int("parser", "max_snapshot_tables")
+MAX_DOCX_SNAPSHOT_SECTIONS = get_int("parser", "max_snapshot_sections")
+MAX_DOCX_RUNS_PER_PARAGRAPH = get_int("parser", "max_runs_per_paragraph")
 
 
 @dataclass(slots=True)

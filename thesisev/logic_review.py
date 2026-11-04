@@ -20,6 +20,7 @@ import re
 from collections import defaultdict
 
 from thesisev.models import Issue, Section, ThesisDocument
+from thesisev.settings import get_int
 
 CATEGORY = "逻辑问题"
 
@@ -41,9 +42,11 @@ _METRIC_CLAIM = re.compile(
     r"(\d{1,3}(?:\.\d+)?)\s*(%|％|ms|毫秒|MB|GB|s|秒)?"
 )
 
-MIN_SECTIONS_FOR_LOGIC = 3
-MIN_CLAIMS_FOR_CONSISTENCY = 4
-MAX_CONSISTENCY_ISSUES = 8
+#: Detection thresholds for the deterministic logic checks.  Tunable from the
+#: ``[logic_review]`` table in ``config/settings.toml``.
+MIN_SECTIONS_FOR_LOGIC = get_int("logic_review", "min_sections_for_logic")
+MIN_CLAIMS_FOR_CONSISTENCY = get_int("logic_review", "min_claims_for_consistency")
+MAX_CONSISTENCY_ISSUES = get_int("logic_review", "max_consistency_issues")
 
 
 def detect_logic_issues(document: ThesisDocument) -> list[Issue]:
