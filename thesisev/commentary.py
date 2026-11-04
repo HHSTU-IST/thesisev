@@ -99,7 +99,7 @@ def generate_comment_with_llm(
                 HumanMessage(content=prompt),
             ],
         )
-    except Exception as exc:  # noqa: BLE001 - any LLM failure falls back to the template
+    except Exception as exc:  # any LLM failure falls back to the template
         logger.warning("comment llm generation failed; using local template: %s", exc)
         return fallback, "fallback"
 

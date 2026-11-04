@@ -68,7 +68,7 @@ def run_deep_review(
         )
         payload = parse_deep_review_json(response)
         findings = normalize_deep_review_findings(payload)
-    except Exception as exc:  # noqa: BLE001 - deep review is optional, degrade to []
+    except Exception as exc:  # deep review is optional, degrade to []
         logger.warning("deep review skipped after LLM failure: %s", exc)
         return []
     deep_issues = [

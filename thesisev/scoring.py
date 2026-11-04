@@ -28,6 +28,7 @@ from thesisev.rubric_utils import (
     normalize_rubric_items,
     normalize_rubric_payload,
     parse_score_value,
+    parse_string_list,
 )
 from thesisev.scoring_content import (
     score_experiment_analysis,
@@ -233,7 +234,7 @@ def score_rubric_items(
                         model=shared_model,
                     )
                 )
-            except Exception as exc:  # noqa: BLE001 - degrade one item, never fail the review
+            except Exception as exc:  # degrade one item, never fail the review
                 logger.warning(
                     "llm scoring failed for %s (rubric=%s); falling back to local: %s",
                     item.name,
@@ -392,7 +393,7 @@ def score_item_locally(
                 rubric_item=rubric_item,
                 format_filename=format_filename,
             )
-        except Exception as exc:  # noqa: BLE001 - malformed spec degrades one item
+        except Exception as exc:  # malformed spec degrades one item
             logger.warning(
                 "format scoring failed (file=%s rubric=%s); degrading format item: %s",
                 format_filename,
@@ -701,16 +702,6 @@ def reject_prompt_placeholders(
                 f"placeholder in {field_name}"
             )
             raise ValueError(msg)
-
-
-def parse_string_list(value: Any) -> list[str]:
-    """Parse a JSON value into a compact string list."""
-
-    if value in (None, ""):
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
 
 
 def validate_llm_deductions(

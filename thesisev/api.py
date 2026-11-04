@@ -299,7 +299,7 @@ def run_evaluation_job(
             rubric=rubric_summary,
             format_requirements=format_summary,
         )
-    except Exception as exc:  # noqa: BLE001 - record any failure on the job
+    except Exception as exc:  # record any failure on the job
         update_evaluation_job(job_id, status="error", error=str(exc))
         return
     finally:

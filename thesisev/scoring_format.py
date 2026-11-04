@@ -16,8 +16,17 @@ from thesisev.rubric_utils import (
     ScoreCriterion,
     build_criterion,
     coerce_finite_number,
+    parse_string_list,
 )
 from thesisev.scoring_content import count_terms
+
+#: The format score keeps a floor: at most this fraction of an item's max score
+#: may be deducted, so a paper is never zeroed out purely on formatting.
+MAX_FORMAT_DEDUCTION_RATIO = 0.8
+
+#: Upper bound on the penalty any single format rule contributes, so one
+#: misconfigured weight cannot dominate the whole format criterion.
+MAX_RULE_PENALTY = 3.0
 
 
 def deduplicate_preserving_order(values: list[str]) -> list[str]:
@@ -93,10 +102,8 @@ def score_format_compliance(
         if format_requirements is not None
         else 0
     )
-    score = max(
-        0.0,
-        rubric_item.max_score - min(rubric_item.max_score * 0.8, summary["deduction"]),
-    )
+    max_deduction = rubric_item.max_score * MAX_FORMAT_DEDUCTION_RATIO
+    score = max(0.0, rubric_item.max_score - min(max_deduction, summary["deduction"]))
     criterion = build_criterion(
         key=rubric_item.key or FORMAT_RUBRIC_KEY,
         rubric_item=rubric_item,
@@ -152,7 +159,7 @@ def _handle_section_count_min(ctx: _FormatRuleContext) -> tuple[bool, str]:
 def _handle_text_contains_any(ctx: _FormatRuleContext) -> tuple[bool, str]:
     signal = ctx["signal"]
     document = ctx["document"]
-    terms = normalize_string_list(signal.get("terms", []))
+    terms = parse_string_list(signal.get("terms", []))
     matched_terms = [term for term in terms if term in document.cleaned_text]
     matched_display = "，".join(matched_terms) if matched_terms else "未命中"
     evidence = f"{ctx['rule']['label']}: {matched_display}"
@@ -161,7 +168,7 @@ def _handle_text_contains_any(ctx: _FormatRuleContext) -> tuple[bool, str]:
 
 def _handle_issue_category(ctx: _FormatRuleContext) -> tuple[bool, str]:
     signal = ctx["signal"]
-    categories = normalize_string_list(signal.get("categories", []))
+    categories = parse_string_list(signal.get("categories", []))
     hit_count = sum(ctx["issue_categories"].get(category, 0) for category in categories)
     evidence = f"{ctx['rule']['label']}: {hit_count} 项问题"
     return hit_count > 0, evidence
@@ -170,7 +177,7 @@ def _handle_issue_category(ctx: _FormatRuleContext) -> tuple[bool, str]:
 def _handle_text_term_count_min(ctx: _FormatRuleContext) -> tuple[bool, str]:
     signal = ctx["signal"]
     document = ctx["document"]
-    terms = normalize_string_list(signal.get("terms", []))
+    terms = parse_string_list(signal.get("terms", []))
     min_hits = parse_optional_float(signal.get("min")) or 0
     hit_count = count_terms(document.cleaned_text, tuple(terms))
     evidence = f"{ctx['rule']['label']}: {hit_count} 次关键词命中"
@@ -249,7 +256,7 @@ def score_format_rules(
             rule_penalty = parse_float_value(rule.get("points", 1)) * parse_float_value(
                 rule.get("section_weight", 1)
             )
-            deduction += min(rule_penalty, 3.0)
+            deduction += min(rule_penalty, MAX_RULE_PENALTY)
             deductions.append(f"{rule['label']} 不符合要求")
             if suggestion:
                 suggestions.append(str(suggestion))
@@ -406,7 +413,7 @@ def evaluate_docx_paragraph_rule(
         else []
     )
     scope = check.get("scope", {})
-    scope_styles = normalize_string_list(
+    scope_styles = parse_string_list(
         scope.get("styles", []) if isinstance(scope, dict) else []
     )
     style_expected = next(
@@ -829,16 +836,6 @@ def format_docx_expected_scalar(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
-
-
-def normalize_string_list(value: Any) -> list[str]:
-    """Normalize a value to a compact non-empty string list."""
-
-    if value in (None, ""):
-        return []
-    if isinstance(value, list):
-        return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
 
 
 def parse_optional_float(value: Any) -> float | None:

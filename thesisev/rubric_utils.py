@@ -85,16 +85,20 @@ def normalize_criterion_name(criterion: Any) -> str:
     return str(re.split(r"[：:]", text, maxsplit=1)[0]).strip()
 
 
-def parse_standards(value: Any) -> list[str]:
-    """Parse rubric standard descriptions."""
+def parse_string_list(value: Any) -> list[str]:
+    """Normalize a JSON-ish value into a compact list of non-empty strings.
+
+    ``None``/empty become ``[]``; a list is stringified element-wise and
+    filtered; any other scalar is wrapped in a single-item list. Shared by the
+    rubric, scoring, and format layers so string coercion stays uniform.
+    """
 
     if value in (None, ""):
         return []
-    if isinstance(value, str):
-        return [value.strip()] if value.strip() else []
     if isinstance(value, list):
         return [str(item).strip() for item in value if str(item).strip()]
-    return [str(value).strip()] if str(value).strip() else []
+    text = str(value).strip()
+    return [text] if text else []
 
 
 def coerce_finite_number(value: Any, *, field: str) -> float:
@@ -192,26 +196,13 @@ def parse_rubric_score(score: Any) -> float:
     raise TypeError(msg)
 
 
-def parse_rubric_standard(standard: Any) -> list[str]:
-    """Parse rubric standard descriptions into a text list."""
-
-    if standard in (None, ""):
-        return []
-    if isinstance(standard, str):
-        stripped = standard.strip()
-        return [stripped] if stripped else []
-    if isinstance(standard, list):
-        return [str(item).strip() for item in standard if str(item).strip()]
-    return [str(standard).strip()] if str(standard).strip() else []
-
-
 def parse_rubric_item(*, criterion: Any, value: Any) -> dict[str, Any]:
     """Parse one rubric item from flat or nested JSON shapes."""
 
     item: dict[str, Any] = {"criterion": parse_rubric_criterion(criterion)}
     if isinstance(value, dict):
         item["score"] = parse_rubric_score(value.get("score", value.get("分数")))
-        item["standard"] = parse_rubric_standard(
+        item["standard"] = parse_string_list(
             value.get("standard", value.get("standards", value.get("标准", [])))
         )
         if value.get("key"):
@@ -259,7 +250,7 @@ def normalize_rubric_items(
         normalized.append(
             RubricItem(
                 name=name,
-                standards=parse_standards(
+                standards=parse_string_list(
                     item.get("standard", item.get("standards", []))
                 ),
                 evaluation=str(item.get("evaluation") or "llm").strip().lower(),
