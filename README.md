@@ -338,7 +338,7 @@ curl http://127.0.0.1:8000/evaluate/jobs/{job_id}
 
 ## 目录说明
 
-- `config/`：静态配置文件，包括评分标准与格式要求（`score_*.json`）、文本词典（`colloquial.json`、`stopwords.json`、`punctuation_*.json`）和 `provider_env.toml`
+- `config/`：静态配置文件，包括评分标准与格式要求（`score_*.json`）、合并后的文本词典（`lexicons.json`，含停用词、口语词与标点规则）、数值调优项（`settings.toml`）和 `provider_env.toml`
 - `data/`：运行时数据，包括历史记录和上传过程中的临时文件
 - `examples/`：可直接运行的样例论文（`sample_thesis.md`）；与 `tests/` 一样被 `.gitignore` 忽略，仅存在于开发机
 - `static/`：前端静态资源，包括样式和交互脚本

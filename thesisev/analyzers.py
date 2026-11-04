@@ -38,11 +38,16 @@ from thesisev.terms import (
     TOPIC_NOISE_GENERIC_TERMS,
 )
 
-STOPWORDS = set(load_json_resource("stopwords.json"))
-COLLOQUIAL = load_json_resource("colloquial.json")
-PUNCTUATION_CHINESE = load_json_resource("punctuation_chinese.json")
-PUNCTUATION_ENGLISH = load_json_resource("punctuation_english.json")
-PUNCTUATION_REPEATED = load_json_resource("punctuation_repeated.json")
+#: The five analyzer dictionaries (stopwords, colloquial wording, and the
+#: chinese/english/repeated punctuation rules) are grouped into a single
+#: ``config/lexicons.json`` file; the module-level names below are unchanged so
+#: the rest of the analyzers keep referencing them exactly as before.
+LEXICONS = load_json_resource("lexicons.json")
+STOPWORDS = set(LEXICONS["stopwords"])
+COLLOQUIAL = LEXICONS["colloquial"]
+PUNCTUATION_CHINESE = LEXICONS["punctuation"]["chinese"]
+PUNCTUATION_ENGLISH = LEXICONS["punctuation"]["english"]
+PUNCTUATION_REPEATED = LEXICONS["punctuation"]["repeated"]
 REPEATED_PUNCTUATION_PATTERN = re.compile(PUNCTUATION_REPEATED["pattern"])
 # Narrative particles trimmed from both ends of a fragment. They are matched
 # character by character, so a regex character class states the intent that a

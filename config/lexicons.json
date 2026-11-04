@@ -1,0 +1,174 @@
+{
+  "stopwords": [
+    "基于",
+    "研究",
+    "设计",
+    "实现",
+    "系统",
+    "方法",
+    "分析",
+    "论文",
+    "一个",
+    "本文",
+    "进行",
+    "以及",
+    "相关"
+  ],
+  "colloquial": {
+    "我觉得": {
+      "rule_id": "colloquial_i_think",
+      "severity": "medium",
+      "message": "检测到主观口语表达“我觉得”，可能不适合正式论文语境。",
+      "suggestion": "建议改为更客观的学术表达，如“本文认为”或直接陈述观点。",
+      "replacement_examples": [
+        "本文认为",
+        "研究结果表明"
+      ]
+    },
+    "其实": {
+      "rule_id": "colloquial_actually",
+      "severity": "medium",
+      "message": "检测到口语化表达“其实”，可能削弱论文表达的正式性。",
+      "suggestion": "建议删除或替换为更正式的连接表达。",
+      "replacement_examples": [
+        "实际上",
+        "从结果来看"
+      ]
+    },
+    "然后": {
+      "rule_id": "colloquial_then",
+      "severity": "medium",
+      "message": "检测到口语化连接词“然后”，建议替换为更正式的逻辑表达。",
+      "suggestion": "连续叙述中建议替换为“随后”“接着”或更明确的逻辑词。",
+      "replacement_examples": [
+        "随后",
+        "接着",
+        "进一步"
+      ]
+    },
+    "挺": {
+      "rule_id": "colloquial_ting",
+      "severity": "medium",
+      "message": "检测到口语化程度词“挺”，可能不适合正式论文语境。",
+      "suggestion": "口语色彩较强，建议改为“较为”“相对”。",
+      "allow_single_char": true,
+      "replacement_examples": [
+        "较为",
+        "相对"
+      ]
+    },
+    "特别": {
+      "rule_id": "colloquial_special",
+      "severity": "low",
+      "message": "检测到较口语化的程度词“特别”，建议结合上下文调整为更正式表达。",
+      "suggestion": "若用于程度强调，建议改为“显著”“尤其”等更正式表达。",
+      "replacement_examples": [
+        "显著",
+        "尤其"
+      ]
+    },
+    "很": {
+      "rule_id": "colloquial_very",
+      "severity": "low",
+      "message": "检测到较泛化的程度词“很”，建议根据上下文使用更具体描述。",
+      "suggestion": "学术写作中可替换为更具体的程度描述。",
+      "allow_single_char": false,
+      "replacement_examples": [
+        "明显",
+        "较强",
+        "较高"
+      ]
+    }
+  },
+  "punctuation": {
+    "chinese": {
+      ",": {
+        "rule_id": "cn_ascii_comma",
+        "message": "中文语境中使用英文逗号，建议改为中文逗号。",
+        "suggestion": "建议将英文逗号`,`替换为中文逗号`，`。",
+        "severity": "medium"
+      },
+      ";": {
+        "rule_id": "cn_ascii_semicolon",
+        "message": "中文语境中使用英文分号，建议改为中文分号。",
+        "suggestion": "建议将英文分号`;`替换为中文分号`；`。",
+        "severity": "medium"
+      },
+      ":": {
+        "rule_id": "cn_ascii_colon",
+        "message": "中文语境中使用英文冒号，建议改为中文冒号。",
+        "suggestion": "建议将英文冒号`:`替换为中文冒号`：`。",
+        "severity": "low"
+      },
+      "(": {
+        "rule_id": "cn_ascii_left_parenthesis",
+        "message": "中文语境中使用英文左括号，建议统一为中文括号。",
+        "suggestion": "建议将英文左括号`(`替换为中文左括号`（`。",
+        "severity": "low"
+      },
+      ")": {
+        "rule_id": "cn_ascii_right_parenthesis",
+        "message": "中文语境中使用英文右括号，建议统一为中文括号。",
+        "suggestion": "建议将英文右括号`)`替换为中文右括号`）`。",
+        "severity": "low"
+      }
+    },
+    "english": {
+      "，": {
+        "rule_id": "en_chinese_comma",
+        "message": "英文或术语语境中使用中文逗号，建议统一为英文逗号。",
+        "suggestion": "建议将中文逗号`，`替换为英文逗号`,`。",
+        "severity": "low"
+      },
+      "。": {
+        "rule_id": "en_chinese_period",
+        "message": "英文或术语语境中使用中文句号，建议统一为英文句号。",
+        "suggestion": "建议将中文句号`。`替换为英文句号`.`。",
+        "severity": "low"
+      },
+      "；": {
+        "rule_id": "en_chinese_semicolon",
+        "message": "英文或术语语境中使用中文分号，建议统一为英文分号。",
+        "suggestion": "建议将中文分号`；`替换为英文分号`;`。",
+        "severity": "low"
+      },
+      "：": {
+        "rule_id": "en_chinese_colon",
+        "message": "英文或术语语境中使用中文冒号，建议统一为英文冒号。",
+        "suggestion": "建议将中文冒号`：`替换为英文冒号`:`。",
+        "severity": "low"
+      },
+      "（": {
+        "rule_id": "en_chinese_left_parenthesis",
+        "message": "英文或术语语境中使用中文左括号，建议统一为英文括号。",
+        "suggestion": "建议将中文左括号`（`替换为英文左括号`(`。",
+        "severity": "low"
+      },
+      "）": {
+        "rule_id": "en_chinese_right_parenthesis",
+        "message": "英文或术语语境中使用中文右括号，建议统一为英文括号。",
+        "suggestion": "建议将中文右括号`）`替换为英文右括号`)`。",
+        "severity": "low"
+      },
+      "【": {
+        "rule_id": "en_chinese_left_bracket",
+        "message": "英文或术语语境中使用中文方头括号，建议统一。",
+        "suggestion": "建议根据上下文改为英文方括号`[`或其他合适形式。",
+        "severity": "low"
+      },
+      "】": {
+        "rule_id": "en_chinese_right_bracket",
+        "message": "英文或术语语境中使用中文方头括号，建议统一。",
+        "suggestion": "建议根据上下文改为英文方括号`]`或其他合适形式。",
+        "severity": "low"
+      }
+    },
+    "repeated": {
+      "pattern": "([，,。.!！?？；;：:])\\1{1,}",
+      "rule_id": "repeated_punctuation",
+      "severity": "low",
+      "message": "检测到连续重复标点，可能影响论文表达的规范性。",
+      "suggestion": "建议根据语义只保留一个必要标点，避免连续重复使用。"
+    }
+  }
+}
