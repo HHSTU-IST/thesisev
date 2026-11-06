@@ -634,7 +634,9 @@ def parse_docx_length(value: Any) -> float | None:
     except AttributeError:
         try:
             return round(float(value) / 12700, 2)
-        except (TypeError, ValueError):
+        except TypeError:
+            return None
+        except ValueError:
             return None
 
 
@@ -665,7 +667,9 @@ def parse_docx_line_spacing_from_paragraph(paragraph: Any) -> float | None:
         return round(float(line_spacing), 2)
     try:
         return round(float(line_spacing), 2)
-    except (TypeError, ValueError):
+    except TypeError:
+        return parse_docx_length(line_spacing)
+    except ValueError:
         return parse_docx_length(line_spacing)
 
 
