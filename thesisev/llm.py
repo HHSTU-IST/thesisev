@@ -679,7 +679,7 @@ def _probe_loaded_context(
     try:
         with opener.open(f"{root}/api/ps", timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError, OSError, ValueError:
+    except (urllib.error.URLError, OSError, ValueError):
         return None
     if not isinstance(payload, dict):
         return None

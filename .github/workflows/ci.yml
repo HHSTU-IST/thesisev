@@ -1,0 +1,41 @@
+name: CI
+
+# Runs the same gate developers run locally (ruff check + format + ty + pytest),
+# but always on a *stock* CPython 3.14 from the runner. That matters: a
+# non-standard interpreter can tolerate latent issues (e.g. Python-2 style
+# `except A, B:` clauses are a hard SyntaxError on official CPython 3.x but some
+# patched builds accept them), so a clean, pinned interpreter here is what keeps
+# the package genuinely importable on the versions it claims to support.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up official CPython 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Install dependencies (from uv.lock)
+        run: uv sync --frozen
+
+      - name: Run the full gate
+        run: bash scripts/check_all.sh
