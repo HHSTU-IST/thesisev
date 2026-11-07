@@ -203,6 +203,13 @@ EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=None)
 #: In-process background evaluation queue.  Uploads return a ``job_id``
 #: immediately and the blocking parse + LLM pipeline runs on a bounded
 #: thread pool so the event loop never stalls under concurrent uploads.
+#:
+#: KNOWN LIMITATION: ``_JOBS`` lives only in process memory and the queue is
+#: designed for single-process use.  A restart drops every in-flight job (it
+#: never reaches a terminal state, so clients must resubmit), and a crash can
+#: skip :func:`cleanup_upload_file` in the worker's ``finally`` and leave a
+#: stray file under ``uploads/``.  A deliberate simplicity trade-off: durable
+#: jobs across restarts would need a persistence layer this project omits.
 EVALUATE_MAX_WORKERS = get_int("api", "evaluate_max_workers")
 MAX_JOBS = get_int("api", "max_jobs")
 _EVALUATE_EXECUTOR = ThreadPoolExecutor(
@@ -212,16 +219,30 @@ _JOB_LOCK = threading.Lock()
 _JOBS: dict[str, dict[str, Any]] = {}
 
 
-def register_evaluation_job() -> dict[str, Any]:
-    """Create a queued job record and enforce a hard cap on the registry.
+#: Statuses that mean a job will never change again; only these are eligible
+#: for capacity eviction, so an accepted job stays pollable until it finishes.
+TERMINAL_JOB_STATUSES = frozenset({"done", "error"})
 
-    The registry is bounded by *total* record count, not just finished ones.
-    Under a burst of uploads the bounded worker pool leaves many records in
-    ``queued``, so trimming only ``done``/``error`` jobs would let ``_JOBS``
-    grow without limit (each ``done`` record also holds a full serialized
-    result). When over capacity we drop the oldest records, preferring
-    already-finished ones before evicting live jobs; the just-inserted job is
-    never evicted.
+
+def register_evaluation_job() -> dict[str, Any] | None:
+    """Create a queued job record, or reject the submission when saturated.
+
+    ``_JOBS`` is bounded by :data:`MAX_JOBS`, enforced without ever losing an
+    in-flight evaluation:
+
+    * Back-pressure: when ``MAX_JOBS`` records are already non-terminal
+      (queued/running) the registry is saturated and this returns ``None`` so
+      the caller can answer ``429`` instead of accepting a request whose
+      result could never be retained.  Every accepted job maps to exactly one
+      executor task, so this also caps the unbounded ``ThreadPoolExecutor``
+      pending queue at :data:`MAX_JOBS`.
+    * Capacity eviction: finished (``done``/``error``) records are dropped,
+      oldest first, to make room for a newly accepted job.  Non-terminal jobs
+      are never evicted, so a job that returned a ``job_id`` stays pollable
+      until it reaches a terminal state.
+
+    Returns a snapshot of the new record (never the shared live dict) so the
+    caller cannot observe a worker mutating it outside the lock.
     """
 
     job_id = uuid.uuid4().hex
@@ -233,18 +254,24 @@ def register_evaluation_job() -> dict[str, Any]:
         "error": None,
     }
     with _JOB_LOCK:
+        live = sum(
+            1 for job in _JOBS.values() if job["status"] not in TERMINAL_JOB_STATUSES
+        )
+        if live >= MAX_JOBS:
+            return None
         _JOBS[job_id] = record
         overflow = len(_JOBS) - MAX_JOBS
         if overflow > 0:
+            # ``_JOBS`` is insertion-ordered by creation, so iterating gives
+            # terminal records oldest-first.
             finished = [
                 key
                 for key, job in _JOBS.items()
-                if key != job_id and job["status"] in {"done", "error"}
+                if key != job_id and job["status"] in TERMINAL_JOB_STATUSES
             ]
-            live = [key for key in _JOBS if key != job_id and key not in set(finished)]
-            for key in (finished + live)[:overflow]:
+            for key in finished[:overflow]:
                 _JOBS.pop(key, None)
-    return record
+        return dict(record)
 
 
 def get_evaluation_job(job_id: str) -> dict[str, Any] | None:
@@ -286,6 +313,7 @@ def run_evaluation_job(
     server that is slow to answer never delays the HTTP response.
     """
 
+    update_evaluation_job(job_id, status="running")
     try:
         model_config = build_model_config(
             engine=engine,
@@ -426,6 +454,13 @@ async def evaluate_upload(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     job = register_evaluation_job()
+    if job is None:
+        # resolve_thesis_source already persisted the upload, so this
+        # rejection path owns deleting it: a refused burst must not leak files.
+        cleanup_upload_file(source)
+        raise HTTPException(
+            status_code=429, detail="too many evaluations in progress; retry shortly"
+        )
     _EVALUATE_EXECUTOR.submit(
         run_evaluation_job,
         job_id=job["job_id"],
@@ -636,9 +671,14 @@ def run_api() -> None:
 def append_history(result: EvaluationResult) -> None:
     """Append a compact evaluation summary to local history.
 
-    Reads, inserts, and writes happen under a process-wide lock, and the file
-    is replaced atomically via ``os.replace``, so concurrent evaluations and
-    multi-worker deployments cannot drop or corrupt entries.
+    Within a single process, the read/insert/write runs under
+    ``_HISTORY_LOCK`` and the file is swapped atomically via ``Path.replace``,
+    so concurrent evaluations cannot tear or corrupt the file.  The lock is
+    process-local: on a multi-worker / multi-process deployment two appends
+    can still interleave and lose an update (last-writer-wins), and the swap
+    does not ``fsync``, so an OS crash right after the write may drop the
+    newest entry.  History durability therefore assumes the same single-process
+    posture as the job queue above.
     """
 
     with _HISTORY_LOCK:

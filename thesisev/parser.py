@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ from docx.oxml.ns import qn
 
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
 from thesisev.settings import get_int
+
+logger = logging.getLogger(__name__)
 
 CHINESE_NUMERALS = "一二三四五六七八九十百千万零"
 SECTION_PATTERN = re.compile(
@@ -635,8 +638,10 @@ def parse_docx_length(value: Any) -> float | None:
         try:
             return round(float(value) / 12700, 2)
         except TypeError:
+            logger.debug("could not interpret docx length %r as a number", value)
             return None
         except ValueError:
+            logger.debug("could not interpret docx length %r as a number", value)
             return None
 
 

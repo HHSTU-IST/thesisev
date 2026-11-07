@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from thesisev import api
 from thesisev.api import app
 
 pytest.importorskip("fastapi.testclient")
@@ -105,3 +106,84 @@ def test_missing_file_is_rejected(client: TestClient) -> None:
     if response.status_code == 200:
         # An empty multipart may still pass the form; the job then reports error.
         assert response.json()["data"]["job_id"]
+
+
+@pytest.fixture()
+def isolated_jobs() -> Any:
+    """Hand a test a clean job registry, restoring the shared one afterwards."""
+
+    saved = dict(api._JOBS)
+    with api._JOB_LOCK:
+        api._JOBS.clear()
+    try:
+        yield api
+    finally:
+        with api._JOB_LOCK:
+            api._JOBS.clear()
+            api._JOBS.update(saved)
+
+
+def test_backpressure_refuses_fourth_live_job(
+    isolated_jobs: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(isolated_jobs, "MAX_JOBS", 3)
+    accepted = [isolated_jobs.register_evaluation_job() for _ in range(3)]
+    assert all(record is not None for record in accepted)
+    # A burst past capacity is refused instead of evicting an in-flight job.
+    assert isolated_jobs.register_evaluation_job() is None
+    with isolated_jobs._JOB_LOCK:
+        live = sum(
+            1
+            for job in isolated_jobs._JOBS.values()
+            if job["status"] not in isolated_jobs.TERMINAL_JOB_STATUSES
+        )
+    assert live == 3
+    assert len(isolated_jobs._JOBS) == 3
+
+
+def test_capacity_evicts_only_terminal_jobs(
+    isolated_jobs: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(isolated_jobs, "MAX_JOBS", 2)
+    live = isolated_jobs.register_evaluation_job()
+    assert live is not None
+    finished = isolated_jobs.register_evaluation_job()
+    assert finished is not None
+    isolated_jobs.update_evaluation_job(finished["job_id"], status="done")
+    # Accepted because only 1 job is live; the finished record is evicted,
+    # the live record is kept.
+    third = isolated_jobs.register_evaluation_job()
+    assert third is not None
+    with isolated_jobs._JOB_LOCK:
+        ids = set(isolated_jobs._JOBS)
+    assert live["job_id"] in ids
+    assert third["job_id"] in ids
+    assert finished["job_id"] not in ids
+
+
+def test_register_returns_snapshot_not_shared_dict(isolated_jobs: Any) -> None:
+    record = isolated_jobs.register_evaluation_job()
+    assert record is not None
+    # A worker mutating the registry must not bleed into the returned copy.
+    isolated_jobs.update_evaluation_job(record["job_id"], status="running")
+    assert record["status"] == "queued"
+
+
+def test_upload_returns_429_when_queue_saturated(
+    client: TestClient, isolated_jobs: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(isolated_jobs, "MAX_JOBS", 1)
+    assert isolated_jobs.register_evaluation_job() is not None
+    response = client.post(
+        "/evaluate/upload",
+        files={
+            "file": (
+                "sample.md",
+                io.BytesIO(SAMPLE_MD.encode("utf-8")),
+                "text/markdown",
+            )
+        },
+        data={"preset": "thesis_tech", "provider": "deepseek", "model": ""},
+    )
+    assert response.status_code == 429
+    assert "retry" in response.json()["detail"].lower()

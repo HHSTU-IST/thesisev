@@ -16,11 +16,14 @@ quickly; it never auto-scores content.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 
 from thesisev.models import Issue, Section, ThesisDocument
 from thesisev.settings import get_int
+
+logger = logging.getLogger(__name__)
 
 CATEGORY = "逻辑问题"
 
@@ -213,6 +216,7 @@ def _claim_number(value: str) -> float:
     try:
         return float(cleaned)
     except ValueError:
+        logger.debug("claim %r has no usable numeric value; treating as +inf", value)
         return float("inf")
 
 

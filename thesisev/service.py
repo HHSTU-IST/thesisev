@@ -134,7 +134,8 @@ def evaluate_document(
         root_sections=document.root_sections,
         model_config=runtime_model_config,
     )
-    if runtime_model_config.is_available():
+    available = runtime_model_config.is_available()
+    if available:
         deep_issues = run_deep_review(
             document=document, model_config=runtime_model_config, existing_issues=issues
         )
@@ -173,15 +174,13 @@ def evaluate_document(
                 "writing_detection": "local",
                 "writing_evaluation": "local",
                 "logic_detection": "local",
-                "logic_deep_review": (
-                    "llm" if runtime_model_config.is_available() else "skipped"
-                ),
+                "logic_deep_review": ("llm" if available else "skipped"),
                 "content_evaluation": comment_source,
                 "llm_input": "content_context_only",
             },
             "model": runtime_model_config.to_metadata(),
             "deep_review": {
-                "source": "llm" if runtime_model_config.is_available() else "skipped",
+                "source": "llm" if available else "skipped",
                 "added_count": len(deep_issues),
             },
         },

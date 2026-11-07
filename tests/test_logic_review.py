@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
+import pytest
+
 from thesisev.analyzers import detect_issue_groups
-from thesisev.logic_review import detect_logic_issues
+from thesisev.logic_review import _claim_number, detect_logic_issues
 from thesisev.models import Paragraph, Section, Sentence, ThesisDocument
 
 
@@ -135,3 +139,11 @@ def test_issue_groups_expose_logic_issues() -> None:
     )
     groups = detect_issue_groups(doc)
     assert any(issue.category == "逻辑问题" for issue in groups.all_issues)
+
+
+def test_non_numeric_claim_falls_back_to_inf_with_debug_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.DEBUG, logger="thesisev.logic_review"):
+        assert _claim_number("约") == float("inf")
+    assert "no usable numeric value" in caplog.text
