@@ -52,6 +52,44 @@ FORMAT_RUBRIC_KEY = "format"
 #: not just prose -- keep it in sync with the bundled config's ``criterion``.
 FORMAT_RUBRIC_NAME = "格式规范"
 
+#: Bundled scoring presets: preset name -> rubric/format filenames.  This is
+#: the single source of truth for the rubric<->format relationship: service
+#: resolves a preset to its files, while scoring/api derive the paired format
+#: from ``FORMAT_RUBRIC_BY_SCORE_RUBRIC`` below.  Adding a preset is one entry
+#: here -- no filename keys or prefix checks are duplicated elsewhere.
+PRESET_CONFIGS: dict[str, dict[str, str]] = {
+    "thesis_tech": {
+        "rubric": "score_thesis_tech.json",
+        "format": "score_thesis_tech_f.json",
+    },
+}
+
+#: Default bundled rubric when a caller supplies no explicit preset.  Kept as a
+#: named alias so existing ``rubric_filename`` signatures stay stable.
+DEFAULT_THESIS_TECH_RUBRIC = PRESET_CONFIGS["thesis_tech"]["rubric"]
+
+#: rubric filename -> paired format filename, derived from ``PRESET_CONFIGS``
+#: so the mapping is declared once.
+FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
+    config["rubric"]: config["format"]
+    for config in PRESET_CONFIGS.values()
+    if config.get("format")
+}
+
+
+def is_builtin_preset_rubric(rubric_filename: str) -> bool:
+    """Whether ``rubric_filename`` belongs to a registered built-in preset.
+
+    Replaces the old ``startswith("score_thesis_tech")`` special case.  A rubric
+    counts as built-in -- so its local scorer fallback must stay complete and
+    ``llm``-configured items are still validated -- iff it is a preset rubric.
+    """
+
+    return any(
+        config["rubric"] == rubric_filename for config in PRESET_CONFIGS.values()
+    )
+
+
 #: Stable keys for built-in thesis rubric items. Aliases (译文/英文摘要) map to
 #: the same key so scorer dispatch never depends on a single Chinese label.
 KNOWN_RUBRIC_KEYS: dict[str, str] = {

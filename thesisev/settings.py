@@ -48,6 +48,7 @@ DEFAULTS: dict[str, dict[str, int | float]] = {
         "upload_read_chunk_bytes": 1024 * 1024,
         "evaluate_max_workers": 2,
         "max_jobs": 20,
+        "job_timeout_seconds": 300,
     },
     "llm": {
         "fallback_max_tokens": 400,

@@ -33,6 +33,40 @@ def test_resolve_preset_files_unknown_preset_raises() -> None:
         resolve_preset_files("does_not_exist")
 
 
+def test_preset_registry_is_single_source_of_truth() -> None:
+    """The rubric<->format mapping is derived from one registry, not duplicated.
+
+    ``PRESET_CONFIGS`` is the sole declaration; ``FORMAT_RUBRIC_BY_SCORE_RUBRIC``
+    and the default rubric are computed from it, ``is_builtin_preset_rubric``
+    reads the same set, and the scoring/api layers must expose the *same* mapping
+    object so no transport code can drift from the registry.
+    """
+
+    from thesisev import api, scoring
+    from thesisev.rubric_utils import (
+        DEFAULT_THESIS_TECH_RUBRIC,
+        FORMAT_RUBRIC_BY_SCORE_RUBRIC,
+        PRESET_CONFIGS,
+        is_builtin_preset_rubric,
+    )
+
+    expected = {
+        config["rubric"]: config["format"]
+        for config in PRESET_CONFIGS.values()
+        if config.get("format")
+    }
+    assert FORMAT_RUBRIC_BY_SCORE_RUBRIC == expected
+    assert DEFAULT_THESIS_TECH_RUBRIC == PRESET_CONFIGS["thesis_tech"]["rubric"]
+
+    for config in PRESET_CONFIGS.values():
+        assert is_builtin_preset_rubric(config["rubric"]) is True
+    assert is_builtin_preset_rubric("custom_rubric.json") is False
+
+    # Same object identity across layers -> a registry edit is instantly visible.
+    assert scoring.FORMAT_RUBRIC_BY_SCORE_RUBRIC is FORMAT_RUBRIC_BY_SCORE_RUBRIC
+    assert api.FORMAT_RUBRIC_BY_SCORE_RUBRIC is FORMAT_RUBRIC_BY_SCORE_RUBRIC
+
+
 def test_importing_cli_does_not_pull_fastapi() -> None:
     """Run in a subprocess so sibling tests importing fastapi can't mask this.
 

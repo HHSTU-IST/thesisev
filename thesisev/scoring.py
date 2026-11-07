@@ -19,11 +19,14 @@ from thesisev.llm import (
 from thesisev.models import Issue, TechnologyStackItem, ThesisDocument
 from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import (
+    DEFAULT_THESIS_TECH_RUBRIC,
+    FORMAT_RUBRIC_BY_SCORE_RUBRIC,
     FORMAT_RUBRIC_KEY,
     FORMAT_RUBRIC_NAME,
     RubricItem,
     ScoreCriterion,
     build_criterion,
+    is_builtin_preset_rubric,
     merge_rubric_items,
     normalize_rubric_items,
     normalize_rubric_payload,
@@ -49,11 +52,6 @@ from thesisev.scoring_format import (
 from thesisev.settings import get_int
 
 logger = logging.getLogger(__name__)
-
-DEFAULT_THESIS_TECH_RUBRIC = "score_thesis_tech.json"
-FORMAT_RUBRIC_BY_SCORE_RUBRIC = {
-    "score_thesis_tech.json": "score_thesis_tech_f.json",
-}
 
 #: Prompt-evidence budgets: how much document text may reach the LLM scoring
 #: prompt, kept bounded so scoring stays within context limits.  Tunable from
@@ -284,7 +282,7 @@ def validate_rubric_local_scorability(
     been reported as a silent zero score.
     """
 
-    thesis_tech = rubric_filename.startswith("score_thesis_tech")
+    thesis_tech = is_builtin_preset_rubric(rubric_filename)
     supported = THESIS_LOCAL_SCORER_KEYS | {FORMAT_RUBRIC_KEY}
     for item in rubric_items:
         if item.evaluation == "llm" and not thesis_tech:

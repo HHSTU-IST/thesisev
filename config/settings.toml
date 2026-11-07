@@ -13,6 +13,7 @@ max_upload_bytes = 20_971_520        # 20 * 1024 * 1024
 upload_read_chunk_bytes = 1_048_576  # 1 * 1024 * 1024
 evaluate_max_workers = 2
 max_jobs = 20
+job_timeout_seconds = 300              # per-job wall-clock deadline before a queued/running job is failed
 
 [llm]
 fallback_max_tokens = 400

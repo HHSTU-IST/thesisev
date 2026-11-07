@@ -27,6 +27,7 @@ from thesisev.models import EvaluationResult
 from thesisev.paths import data_dir, project_root, static_dir, templates_dir
 from thesisev.resources import load_json_resource
 from thesisev.rubric_utils import (
+    FORMAT_RUBRIC_BY_SCORE_RUBRIC,
     FORMAT_RUBRIC_KEY,
     FORMAT_RUBRIC_NAME,
     normalize_format_requirements_payload,
@@ -34,11 +35,7 @@ from thesisev.rubric_utils import (
     normalize_structured_format_requirements,
     parse_score_value,
 )
-from thesisev.scoring import (
-    FORMAT_RUBRIC_BY_SCORE_RUBRIC,
-    build_format_standards,
-    sum_format_rule_points,
-)
+from thesisev.scoring import build_format_standards, sum_format_rule_points
 from thesisev.scoring_format import extract_format_rules, normalize_format_spec_payload
 from thesisev.service import (
     evaluate_document,
@@ -212,6 +209,7 @@ EVALUATE_UPLOAD_MAX_TOKENS_DEFAULT = Form(default=None)
 #: jobs across restarts would need a persistence layer this project omits.
 EVALUATE_MAX_WORKERS = get_int("api", "evaluate_max_workers")
 MAX_JOBS = get_int("api", "max_jobs")
+JOB_TIMEOUT_SECONDS = get_int("api", "job_timeout_seconds")
 _EVALUATE_EXECUTOR = ThreadPoolExecutor(
     max_workers=EVALUATE_MAX_WORKERS, thread_name_prefix="thesisev-eval"
 )
@@ -245,6 +243,7 @@ def register_evaluation_job() -> dict[str, Any] | None:
     caller cannot observe a worker mutating it outside the lock.
     """
 
+    reap_stale_jobs()
     job_id = uuid.uuid4().hex
     record = {
         "job_id": job_id,
@@ -275,8 +274,14 @@ def register_evaluation_job() -> dict[str, Any] | None:
 
 
 def get_evaluation_job(job_id: str) -> dict[str, Any] | None:
-    """Return a shallow copy of the job record, if present."""
+    """Return a shallow copy of the job record, if present.
 
+    Polling also drives the deadline sweep so a stuck job is surfaced as
+    ``error`` to the waiting client rather than spinning until it is reaped
+    by an unrelated request.
+    """
+
+    reap_stale_jobs()
     with _JOB_LOCK:
         record = _JOBS.get(job_id)
         return dict(record) if record is not None else None
@@ -289,6 +294,54 @@ def update_evaluation_job(job_id: str, **fields: Any) -> None:
         record = _JOBS.get(job_id)
         if record is not None:
             record.update(fields)
+
+
+def finalize_evaluation_job(job_id: str, **fields: Any) -> bool:
+    """Move a job to a terminal state unless the reaper already got there.
+
+    Returns whether the write happened.  A worker whose evaluation overran
+    the deadline must not resurrect a job the reaper already failed, so a
+    terminal record is left untouched.
+    """
+
+    with _JOB_LOCK:
+        record = _JOBS.get(job_id)
+        if record is None or record["status"] in TERMINAL_JOB_STATUSES:
+            return False
+        record.update(fields)
+        return True
+
+
+def reap_stale_jobs(now: datetime | None = None) -> list[str]:
+    """Fail non-terminal jobs that have overrun :data:`JOB_TIMEOUT_SECONDS`.
+
+    Invoked opportunistically from the submit and poll paths (no background
+    thread), so a hung or wedged job eventually reaches a terminal state:
+    waiting clients stop spinning and the registry slot becomes eligible for
+    capacity eviction again.  Running jobs are timed against ``started_at``,
+    still-queued jobs against ``created_at``.  A worker thread that is still
+    executing cannot be killed, but its late result is discarded by
+    :func:`finalize_evaluation_job`.
+    """
+
+    reference = now or datetime.now(UTC)
+    reaped: list[str] = []
+    with _JOB_LOCK:
+        for key, record in _JOBS.items():
+            if record["status"] in TERMINAL_JOB_STATUSES:
+                continue
+            stamp = record.get("started_at") or record.get("created_at")
+            if not isinstance(stamp, str):
+                continue
+            try:
+                started = datetime.fromisoformat(stamp)
+            except ValueError:
+                continue
+            if (reference - started).total_seconds() > JOB_TIMEOUT_SECONDS:
+                record["status"] = "error"
+                record["error"] = f"evaluation timed out after {JOB_TIMEOUT_SECONDS}s"
+                reaped.append(key)
+    return reaped
 
 
 def run_evaluation_job(
@@ -313,7 +366,11 @@ def run_evaluation_job(
     server that is slow to answer never delays the HTTP response.
     """
 
-    update_evaluation_job(job_id, status="running")
+    update_evaluation_job(
+        job_id,
+        status="running",
+        started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
     try:
         model_config = build_model_config(
             engine=engine,
@@ -333,7 +390,7 @@ def run_evaluation_job(
             format_requirements=format_summary,
         )
     except Exception as exc:  # noqa: BLE001 - record any failure on the job
-        update_evaluation_job(job_id, status="error", error=str(exc))
+        finalize_evaluation_job(job_id, status="error", error=str(exc))
         return
     finally:
         cleanup_upload_file(source)
@@ -344,8 +401,8 @@ def run_evaluation_job(
     if format_summary is not None:
         payload["metadata"]["format_requirements"] = format_summary
     payload["metadata"]["preset"] = preset
-    append_history(result)
-    update_evaluation_job(job_id, status="done", result=payload)
+    if finalize_evaluation_job(job_id, status="done", result=payload):
+        append_history(result)
 
 
 @app.get("/", response_class=HTMLResponse)

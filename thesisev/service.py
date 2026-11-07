@@ -27,24 +27,10 @@ from thesisev.deep_review import run_deep_review
 from thesisev.llm import ModelConfig, build_model_config
 from thesisev.models import EvaluationResult, Issue, ThesisDocument
 from thesisev.parser import load_document
-from thesisev.scoring import (
-    DEFAULT_THESIS_TECH_RUBRIC,
-    build_content_context,
-    calculate_score_report,
-)
+from thesisev.rubric_utils import DEFAULT_THESIS_TECH_RUBRIC, PRESET_CONFIGS
+from thesisev.scoring import build_content_context, calculate_score_report
 
 __all__ = ["evaluate_document", "resolve_preset_files", "structure_document"]
-
-
-#: Bundled rubric/format filenames per scoring preset.  Kept here (not in the
-#: transport layer) so both the HTTP API and the CLI resolve presets from one
-#: framework-free source of truth.
-PRESET_CONFIGS: dict[str, dict[str, str]] = {
-    "thesis_tech": {
-        "rubric": "score_thesis_tech.json",
-        "format": "score_thesis_tech_f.json",
-    },
-}
 
 
 def resolve_preset_files(preset: str) -> tuple[str, str | None]:

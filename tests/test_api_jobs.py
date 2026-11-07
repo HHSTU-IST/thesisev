@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -187,3 +188,52 @@ def test_upload_returns_429_when_queue_saturated(
     )
     assert response.status_code == 429
     assert "retry" in response.json()["detail"].lower()
+
+
+def test_reap_stale_jobs_fails_overdue_job(
+    isolated_jobs: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(isolated_jobs, "JOB_TIMEOUT_SECONDS", 60)
+    job = isolated_jobs.register_evaluation_job()
+    assert job is not None
+    now = datetime.now(UTC)
+    old = (now - timedelta(seconds=3600)).isoformat(timespec="seconds")
+    isolated_jobs.update_evaluation_job(job["job_id"], status="running", started_at=old)
+    reaped = isolated_jobs.reap_stale_jobs(now=now)
+    assert job["job_id"] in reaped
+    record = isolated_jobs.get_evaluation_job(job["job_id"])
+    assert record is not None
+    assert record["status"] == "error"
+    assert "timed out" in record["error"]
+
+
+def test_reap_leaves_fresh_running_job_alone(
+    isolated_jobs: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(isolated_jobs, "JOB_TIMEOUT_SECONDS", 60)
+    job = isolated_jobs.register_evaluation_job()
+    assert job is not None
+    isolated_jobs.update_evaluation_job(
+        job["job_id"],
+        status="running",
+        started_at=datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+    assert isolated_jobs.reap_stale_jobs(now=datetime.now(UTC)) == []
+    record = isolated_jobs.get_evaluation_job(job["job_id"])
+    assert record is not None
+    assert record["status"] == "running"
+
+
+def test_finalize_wont_resurrect_terminal_job(isolated_jobs: Any) -> None:
+    job = isolated_jobs.register_evaluation_job()
+    assert job is not None
+    assert isolated_jobs.finalize_evaluation_job(
+        job["job_id"], status="done", result={"x": 1}
+    )
+    # A late worker write must not overwrite the already-terminal record.
+    assert not isolated_jobs.finalize_evaluation_job(
+        job["job_id"], status="done", result={"y": 2}
+    )
+    record = isolated_jobs.get_evaluation_job(job["job_id"])
+    assert record is not None
+    assert record["result"] == {"x": 1}
