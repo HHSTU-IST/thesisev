@@ -55,8 +55,8 @@ def test_preset_registry_is_single_source_of_truth() -> None:
         for config in PRESET_CONFIGS.values()
         if config.get("format")
     }
-    assert FORMAT_RUBRIC_BY_SCORE_RUBRIC == expected
-    assert DEFAULT_THESIS_TECH_RUBRIC == PRESET_CONFIGS["thesis_tech"]["rubric"]
+    assert expected == FORMAT_RUBRIC_BY_SCORE_RUBRIC
+    assert PRESET_CONFIGS["thesis_tech"]["rubric"] == DEFAULT_THESIS_TECH_RUBRIC
 
     for config in PRESET_CONFIGS.values():
         assert is_builtin_preset_rubric(config["rubric"]) is True
